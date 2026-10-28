@@ -131,9 +131,20 @@ function playReadySound() {
         if (topic.endsWith('/orders') && data.orders && myOrderNum) {
           const found = data.orders.find(o => o.number === myOrderNum);
           if (found) {
-            currentOrderState = found;
-            updateUI(found);
-          } else {
+  const wasReady =
+    currentOrderState &&
+    currentOrderState.status === "ready";
+
+  const isNowReady = found.status === "ready";
+
+  if (isNowReady && !wasReady) {
+    playReadySound();
+  }
+
+  currentOrderState = found;
+  updateUI(found);
+}
+ else {
             // If order was removed entirely
             if (currentOrderState && currentOrderState.status === 'picked_up') {
               // Already handled
