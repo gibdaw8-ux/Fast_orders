@@ -209,15 +209,33 @@
       return String(value ?? '').replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
     }
 
+    
     function renderMenu() {
-      const grid = document.getElementById('menu-grid');
-      grid.innerHTML = menuItems.map(item => `
-        <button type="button" onclick="addToCart(${item.id})" class="w-full bg-white hover:bg-orange-50 border border-slate-200 hover:border-orange-300 p-3 rounded-2xl text-left flex flex-col justify-between transition shadow-sm active:scale-95 h-full">
-          <span class="font-bold text-xs text-slate-800">${escapeHtml(item.name)}</span>
-          <span class="text-xs text-orange-600 font-extrabold mt-2">$${item.price.toFixed(2)}</span>
-        </button>
-      `).join('');
-    }
+  const grid = document.getElementById('menu-grid');
+
+  const visibleItems = menuItems.filter(item => {
+    const category = item.category || 'Extras';
+
+    return selectedMenuCategory === 'All' ||
+           category === selectedMenuCategory;
+  });
+
+  grid.innerHTML = visibleItems.map(item => `
+    <button type="button"
+      onclick="addToCart(${item.id})"
+      class="w-full bg-white hover:bg-orange-50 border border-slate-200 p-3 rounded-2xl text-left flex flex-col justify-between h-full">
+
+      <span class="font-bold text-xs text-slate-800">
+        ${escapeHtml(item.name)}
+      </span>
+
+      <span class="text-xs text-orange-600 font-extrabold mt-2">
+        $${Number(item.price || 0).toFixed(2)}
+      </span>
+    </button>
+  `).join('') ||
+  '<p class="col-span-full text-xs text-slate-400 py-6 text-center">No items in this category yet.</p>';
+}
 
     function addToCart(id) {
       const item = menuItems.find(x => x.id === id);
