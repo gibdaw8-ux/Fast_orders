@@ -1,0 +1,435 @@
+<!DOCTYPE html>
+<html lang="en" dir="ltr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Fast Orders POS - Cashier System</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
+  <!-- QRCode.js -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800;900&family=Silkscreen&display=swap" rel="stylesheet">
+  <style>
+    body { font-family: 'Inter', sans-serif; background-color: #f1f5f9; user-select: none; }
+    .dot-matrix { font-family: 'Silkscreen', monospace; letter-spacing: -2px; }
+  </style>
+</head>
+<body class="min-h-screen p-4 md:p-6 text-slate-800">
+
+  <div class="max-w-6xl mx-auto bg-white rounded-3xl shadow-xl border border-slate-200 overflow-hidden flex flex-col min-h-[680px]">
+
+    <!-- Top Orange Bar -->
+    <div class="bg-orange-500 text-white px-6 py-4 flex items-center justify-between">
+      <div>
+        <span class="font-extrabold text-base block">🔔 Cashier POS & Menu Panel</span>
+        <span id="cash-sync-status" class="text-xs text-orange-100 font-semibold">Connecting to cloud...</span>
+      </div>
+      <span class="text-xs bg-orange-600 px-3 py-1.5 rounded-xl font-bold tracking-wider">THE ROASTERY POS</span>
+    </div>
+
+    <!-- Main POS Layout -->
+    <div class="p-6 grid grid-cols-1 lg:grid-cols-12 gap-6 flex-1">
+
+      <!-- LEFT SIDE: MENU & CART -->
+      <div class="lg:col-span-7 flex flex-col gap-5 bg-slate-50 p-5 rounded-2xl border border-slate-200">
+        <div>
+          <h2 class="font-extrabold text-base text-slate-900 mb-0.5">📋 Cafe Menu</h2>
+          <p class="text-xs text-slate-500">Tap items to add to the customer order</p>
+        </div>
+
+        <!-- Menu Grid Container -->
+        <div id="menu-grid" class="grid grid-cols-2 sm:grid-cols-3 gap-2.5 max-h-[300px] overflow-y-auto pr-1"></div>
+
+        <!-- Cart Box -->
+        <div class="bg-white border-2 border-orange-200 rounded-2xl p-4 flex flex-col justify-between flex-1 shadow-sm">
+          <div>
+            <div class="flex items-center justify-between mb-2 border-b border-slate-100 pb-2">
+              <span class="font-extrabold text-xs text-slate-700 uppercase tracking-wider">Current Order Cart</span>
+              <button onclick="clearCart()" class="text-xs text-red-600 font-bold hover:underline">Clear Cart</button>
+            </div>
+            <div id="cart-items-list" class="space-y-1.5 max-h-[110px] overflow-y-auto min-h-[50px] text-xs font-semibold text-slate-700">
+              <span class="text-slate-400 italic">No items selected yet...</span>
+            </div>
+          </div>
+
+          <div class="mt-4 pt-3 border-t border-slate-100 flex items-center justify-between gap-3">
+            <div>
+              <span class="text-[11px] text-slate-400 block font-bold">Next Order #</span>
+              <span id="next-num-display" class="dot-matrix text-2xl text-orange-600">1</span>
+            </div>
+            <div class="text-right">
+              <span class="text-[11px] text-slate-400 block font-bold">Total Est.</span>
+              <span id="cart-total" class="text-lg font-black text-slate-900">$0.00</span>
+            </div>
+            <button onclick="submitOrder()" class="bg-slate-900 hover:bg-slate-800 active:scale-95 text-white font-black text-xs px-5 py-3.5 rounded-xl transition shadow-md shrink-0">
+              + Complete Order & QR 🚀
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- RIGHT SIDE: QUEUES -->
+      <div class="lg:col-span-5 flex flex-col gap-5">
+        <div class="flex items-center justify-between bg-white p-3.5 rounded-2xl border border-slate-200 shadow-sm">
+          <span class="text-xs font-bold text-slate-600">Active Queue Status</span>
+          <span class="text-xs font-black bg-slate-100 px-3 py-1 rounded-xl text-slate-800"><strong id="active-count">0</strong> Orders Active</span>
+        </div>
+
+        <!-- Preparing Queue -->
+        <div class="bg-slate-50 p-4 rounded-2xl border border-slate-200 flex flex-col flex-1">
+          <div class="flex items-center gap-2 mb-3">
+            <span class="w-3 h-3 rounded-full bg-amber-500"></span>
+            <h2 class="font-extrabold text-sm text-slate-800">Preparing (<span id="prep-count">0</span>)</h2>
+          </div>
+          <div id="prep-list" class="space-y-2.5 flex-1 overflow-y-auto max-h-[220px]"></div>
+        </div>
+
+        <!-- Ready / Picked Up Queue -->
+        <div class="bg-slate-50 p-4 rounded-2xl border border-slate-200 flex flex-col flex-1">
+          <div class="flex items-center gap-2 mb-3">
+            <span class="w-3 h-3 rounded-full bg-emerald-500"></span>
+            <h2 class="font-extrabold text-sm text-slate-800">Ready & Completed (<span id="ready-count">0</span>)</h2>
+          </div>
+          <div id="ready-list" class="space-y-2.5 flex-1 overflow-y-auto max-h-[220px]"></div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- NOTIFICATION TOAST -->
+  <div id="coming-toast" class="hidden fixed bottom-6 right-6 bg-emerald-600 text-white px-5 py-3.5 rounded-2xl text-sm font-bold shadow-2xl flex items-center gap-3 z-50">
+    <span id="coming-toast-text">🏃‍♂️ Customer is on their way!</span>
+    <button onclick="this.parentElement.classList.add('hidden')" class="text-emerald-200 font-black ml-2">✕</button>
+  </div>
+
+  <!-- VIRTUAL RECEIPT PREVIEW MODAL -->
+  <div id="receipt-modal" class="hidden fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+    <div class="bg-white rounded-3xl p-6 max-w-sm w-full text-center shadow-2xl border border-slate-200 flex flex-col items-center">
+      <span class="bg-orange-100 text-orange-800 text-xs font-bold px-3 py-1 rounded-full mb-2">Virtual Receipt Preview</span>
+      <div id="virtual-ticket-content" class="bg-neutral-50 border-2 border-dashed border-slate-300 rounded-2xl p-4 w-full text-left font-mono text-xs shadow-inner mb-4"></div>
+      <div class="flex gap-2 w-full">
+        <button onclick="closeModal()" class="flex-1 py-3 rounded-xl bg-slate-200 hover:bg-slate-300 text-slate-800 font-bold text-xs transition">Close</button>
+        <button onclick="window.print()" class="flex-1 py-3 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs transition">🖨️ Print Ticket</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const GITHUB_CUSTOMER_URL = 'https://gibdaw8-ux.github.io/fast-orders/';
+    const BASE_TOPIC = 'fast_orders_channel_2026';
+    const client = mqtt.connect('wss://broker.emqx.io:8084/mqtt');
+
+    const defaultMenu = [
+      { id: 1, name: '☕ Latte', price: 4.50 },
+      { id: 2, name: '☕ Cappuccino', price: 4.50 },
+      { id: 3, name: '☕ Americano', price: 3.50 },
+      { id: 4, name: '☕ Espresso', price: 3.00 },
+      { id: 5, name: '🍵 Matcha Latte', price: 5.00 },
+      { id: 6, name: '🥐 Butter Croissant', price: 3.50 },
+      { id: 7, name: '🧁 Blueberry Muffin', price: 3.25 },
+      { id: 8, name: '🥪 Turkey Sandwich', price: 6.50 },
+      { id: 9, name: '🧃 Fresh Orange Juice', price: 4.00 }
+    ];
+
+    let menuItems = JSON.parse(localStorage.getItem('cafe_custom_menu')) || defaultMenu;
+    let currentCart = [];
+    let orders = [];
+    let isSynced = false; // Prevents overwriting state before state is pulled
+
+    const todayStr = new Date().toDateString();
+    const savedDate = localStorage.getItem('cafe_order_date');
+    let nextOrderCounter = parseInt(localStorage.getItem('cafe_next_counter')) || 1;
+
+    if (savedDate !== todayStr) {
+      nextOrderCounter = 1;
+      localStorage.setItem('cafe_order_date', todayStr);
+      localStorage.setItem('cafe_next_counter', nextOrderCounter);
+    }
+
+    client.on('connect', () => {
+      document.getElementById('cash-sync-status').innerText = '● Connected';
+      document.getElementById('cash-sync-status').className = 'text-[10px] text-emerald-600 font-bold';
+      client.subscribe(`${BASE_TOPIC}/orders`);
+      client.subscribe(`${BASE_TOPIC}/menu`);
+      client.subscribe(`${BASE_TOPIC}/events`);
+    });
+
+    client.on('message', (topic, message) => {
+      try {
+        const data = JSON.parse(message.toString());
+
+        if (topic.endsWith('/orders')) {
+          if (data.orders && Array.isArray(data.orders)) {
+            orders = data.orders.map(o => ({ ...o, number: String(o.number) }));
+            isSynced = true;
+            // Keep the local counter ahead of any order number already in the shared queue.
+            const numericOrders = orders.map(o => Number(o.number)).filter(n => Number.isInteger(n) && n > 0);
+            if (numericOrders.length) {
+              nextOrderCounter = Math.max(nextOrderCounter, Math.max(...numericOrders) + 1);
+              localStorage.setItem('cafe_next_counter', String(nextOrderCounter));
+            }
+            document.getElementById('cash-sync-status').innerText = '● Connected & Synced';
+            render();
+          }
+        } else if (topic.endsWith('/menu')) {
+          if (data.menu && Array.isArray(data.menu)) {
+            menuItems = data.menu;
+            localStorage.setItem('cafe_custom_menu', JSON.stringify(menuItems));
+            renderMenu();
+          }
+        } else if (topic.endsWith('/events')) {
+          if (data.type === 'coming') {
+            const order = orders.find(o => String(o.number) === String(data.number));
+            if (order) {
+              order.customerComing = true;
+              render();
+              publishOrders();
+            }
+            const toast = document.getElementById('coming-toast');
+            document.getElementById('coming-toast-text').innerText = `🏃‍♂️ Order #${data.number} is heading to the counter!`;
+            toast.classList.remove('hidden');
+            setTimeout(() => toast.classList.add('hidden'), 5000);
+          }
+        }
+      } catch (e) {}
+    });
+
+    function publishOrders() {
+      if (!isSynced || !client.connected) return; // Never publish before the retained queue has been received.
+      client.publish(`${BASE_TOPIC}/orders`, JSON.stringify({ orders }), { retain: true });
+    }
+
+    function publishEvent(eventData) {
+      if (!client.connected) return;
+      client.publish(`${BASE_TOPIC}/events`, JSON.stringify(eventData), { retain: false });
+    }
+
+    function escapeHtml(value) {
+      return String(value ?? '').replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
+    }
+
+    function renderMenu() {
+      const grid = document.getElementById('menu-grid');
+      grid.innerHTML = menuItems.map(item => `
+        <button type="button" onclick="addToCart(${item.id})" class="w-full bg-white hover:bg-orange-50 border border-slate-200 hover:border-orange-300 p-3 rounded-2xl text-left flex flex-col justify-between transition shadow-sm active:scale-95 h-full">
+          <span class="font-bold text-xs text-slate-800">${escapeHtml(item.name)}</span>
+          <span class="text-xs text-orange-600 font-extrabold mt-2">$${item.price.toFixed(2)}</span>
+        </button>
+      `).join('');
+    }
+
+    function addToCart(id) {
+      const item = menuItems.find(x => x.id === id);
+      const existing = currentCart.find(x => x.id === id);
+      if (existing) { existing.qty++; } else { currentCart.push({ ...item, qty: 1 }); }
+      renderCart();
+    }
+
+    function removeFromCart(id) {
+      currentCart = currentCart.filter(x => x.id !== id);
+      renderCart();
+    }
+
+    function clearCart() {
+      currentCart = [];
+      renderCart();
+    }
+
+    function renderCart() {
+      const list = document.getElementById('cart-items-list');
+      const totalEl = document.getElementById('cart-total');
+
+      if (currentCart.length === 0) {
+        list.innerHTML = `<span class="text-slate-400 italic">No items selected yet...</span>`;
+        totalEl.innerText = '$0.00';
+        return;
+      }
+
+      let total = 0;
+      list.innerHTML = currentCart.map(item => {
+        const itemTotal = item.price * item.qty;
+        total += itemTotal;
+        return `
+          <div class="flex items-center justify-between bg-slate-50 px-3 py-1.5 rounded-xl">
+            <span class="font-bold text-slate-800">${item.qty}x ${escapeHtml(item.name)} <span class="text-[10px] text-slate-400">($${item.price.toFixed(2)} ea)</span></span>
+            <div class="flex items-center gap-2">
+              <span class="font-semibold text-slate-600">$${itemTotal.toFixed(2)}</span>
+              <button type="button" onclick="removeFromCart(${item.id})" class="text-red-500 font-bold px-1">✕</button>
+            </div>
+          </div>
+        `;
+      }).join('');
+
+      totalEl.innerText = `$${total.toFixed(2)}`;
+    }
+
+    function submitOrder() {
+      if (currentCart.length === 0) return alert('Please select at least one item from the menu!');
+
+      const val = nextOrderCounter.toString();
+      const cartSnapshot = JSON.parse(JSON.stringify(currentCart));
+      let totalAmount = cartSnapshot.reduce((sum, i) => sum + (i.price * i.qty), 0);
+
+      orders.push({ 
+        number: val, 
+        items: cartSnapshot, 
+        total: totalAmount,
+        status: 'preparing', 
+        ringing: false, 
+        customerComing: false 
+      });
+
+      nextOrderCounter++;
+      localStorage.setItem('cafe_next_counter', nextOrderCounter);
+
+      isSynced = true;
+      publishOrders();
+      showVirtualTicket(val, cartSnapshot, totalAmount);
+      clearCart();
+    }
+
+    function markReady(num) {
+      const o = orders.find(x => x.number === num);
+      if (o) { 
+        o.status = 'ready'; 
+        o.ringing = true; 
+        o.customerComing = false; 
+        publishOrders();
+        publishEvent({ type: 'ring', number: num });
+      }
+    }
+
+    function completeOrder(num) {
+      const o = orders.find(x => x.number === num);
+      if (o) {
+        o.status = 'picked_up';
+        o.ringing = false;
+        publishOrders();
+        publishEvent({ type: 'completed', number: num });
+      }
+    }
+
+    function removeOrder(num) {
+      // Keep the picked-up record in the shared snapshot so a customer who was
+      // temporarily offline can still see the completed status when reconnecting.
+      const order = orders.find(x => String(x.number) === String(num));
+      if (order && order.status === 'picked_up') {
+        order.archived = true;
+        publishOrders();
+        render();
+      }
+    }
+
+    function showVirtualTicketByNumber(num) {
+      const targetOrder = orders.find(o => o.number === num);
+      if (targetOrder) {
+        showVirtualTicket(targetOrder.number, targetOrder.items || [], targetOrder.total || 0);
+      }
+    }
+
+    function showVirtualTicket(num, items, total) {
+      const modal = document.getElementById('receipt-modal');
+      const ticketContent = document.getElementById('virtual-ticket-content');
+      
+      const escapeHtml = value => String(value ?? '').replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
+      let itemsHtml = items.map(i => `
+        <div style="display: flex; justify-content: space-between; margin-bottom: 3px;">
+          <span>${i.qty}x ${escapeHtml(i.name)}</span>
+          <span>$${(i.price * i.qty).toFixed(2)}</span>
+        </div>
+        <div style="font-size: 9px; color: #888; margin-bottom: 4px;">@ $${i.price.toFixed(2)} each</div>
+      `).join('');
+
+      ticketContent.innerHTML = `
+        <div style="text-align: center;">
+          <h3 style="margin: 0; font-size: 15px; font-weight: bold;">THE ROASTERY</h3>
+          <p style="margin: 2px 0; font-size: 10px; color: #666;">Smart Order Receipt</p>
+        </div>
+        <hr style="border: dashed 1px #cbd5e1; margin: 6px 0;">
+        <div style="text-align: center;">
+          <span style="font-size: 10px; color: #666;">ORDER NUMBER</span>
+          <h1 class="dot-matrix" style="font-size: 38px; margin: 2px 0; color: #0f172a;">${num}</h1>
+        </div>
+        <hr style="border: dashed 1px #cbd5e1; margin: 6px 0;">
+        <div style="margin-bottom: 6px;">${itemsHtml}</div>
+        <hr style="border: dashed 1px #cbd5e1; margin: 6px 0;">
+        <div style="display: flex; justify-content: space-between; font-weight: bold; font-size: 13px;">
+          <span>TOTAL:</span>
+          <span>$${total.toFixed(2)}</span>
+        </div>
+        <hr style="border: dashed 1px #cbd5e1; margin: 6px 0;">
+        <p style="text-align: center; font-size: 9px; color: #666; margin-bottom: 4px;">Scan to track live status:</p>
+        <div id="modal-qrcode" style="display: flex; justify-content: center; margin: 4px 0;"></div>
+      `;
+
+      modal.classList.remove('hidden');
+      const orderUrl = `${GITHUB_CUSTOMER_URL}?order=${num}`;
+      new QRCode(document.getElementById('modal-qrcode'), {
+        text: orderUrl, width: 110, height: 110, colorDark: '#0f172a', colorLight: '#ffffff'
+      });
+    }
+
+    function closeModal() { document.getElementById('receipt-modal').classList.add('hidden'); }
+
+    function render() {
+      const prep = orders.filter(o => o.status === 'preparing');
+      const readyOrDone = orders.filter(o => !o.archived && (o.status === 'ready' || o.status === 'picked_up'));
+
+      document.getElementById('active-count').innerText = orders.filter(o => o.status !== 'picked_up').length;
+      document.getElementById('prep-count').innerText = prep.length;
+      document.getElementById('ready-count').innerText = readyOrDone.length;
+      document.getElementById('next-num-display').innerText = nextOrderCounter;
+
+      document.getElementById('prep-list').innerHTML = prep.map(o => {
+        const descText = o.items ? o.items.map(i => `${i.qty}x ${i.name}`).join(', ') : o.desc;
+        return `
+          <div class="bg-white border border-slate-200 rounded-2xl p-3 flex items-center justify-between shadow-sm gap-2">
+            <div class="overflow-hidden">
+              <div class="flex items-baseline gap-2">
+                <span class="dot-matrix text-2xl text-slate-800">${o.number}</span>
+                <span class="text-[10px] text-amber-600 font-bold">Preparing</span>
+                <span class="text-xs font-black text-slate-700">$${o.total ? o.total.toFixed(2) : '0.00'}</span>
+              </div>
+              <p class="text-xs text-slate-600 font-semibold truncate" title="${escapeHtml(descText)}">${escapeHtml(descText)}</p>
+            </div>
+            <div class="flex items-center gap-1.5 shrink-0">
+              <button type="button" onclick="showVirtualTicketByNumber('${o.number}')" class="bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold px-2.5 py-2 rounded-xl">🎫</button>
+              <button type="button" onclick="markReady('${o.number}')" class="bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold px-3 py-2 rounded-xl">✓ Ready</button>
+            </div>
+          </div>
+        `;
+      }).join('') || '<span class="text-xs text-slate-400 py-3 block text-center">No orders preparing</span>';
+
+      document.getElementById('ready-list').innerHTML = readyOrDone.map(o => {
+        const descText = o.items ? o.items.map(i => `${i.qty}x ${i.name}`).join(', ') : o.desc;
+        const isPickedUp = o.status === 'picked_up';
+        return `
+          <div class="bg-white border border-slate-200 rounded-2xl p-3 flex items-center justify-between shadow-sm gap-2">
+            <div class="overflow-hidden">
+              <div class="flex items-baseline gap-2">
+                <span class="dot-matrix text-2xl text-slate-900">${o.number}</span>
+                <span class="text-xs font-bold ${isPickedUp ? 'text-slate-400' : (o.customerComing ? 'text-emerald-600' : 'text-orange-600')}">
+                  ${isPickedUp ? '✓ Picked Up' : (o.customerComing ? '🏃‍♂️ On the way' : '🔔 Ringing')}
+                </span>
+                <span class="text-xs font-black text-slate-700">$${o.total ? o.total.toFixed(2) : '0.00'}</span>
+              </div>
+              <p class="text-xs text-slate-600 font-semibold truncate" title="${escapeHtml(descText)}">${escapeHtml(descText)}</p>
+            </div>
+            <div class="flex gap-1 shrink-0">
+              ${!isPickedUp ? `
+                <button type="button" onclick="markReady('${o.number}')" class="bg-orange-500 hover:bg-orange-600 text-white text-xs font-bold px-2 py-2 rounded-xl">🔔</button>
+                <button type="button" onclick="completeOrder('${o.number}')" class="bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold px-2.5 py-2 rounded-xl">✓ Picked Up</button>
+              ` : `
+                <button type="button" onclick="removeOrder('${o.number}')" class="bg-slate-200 hover:bg-red-500 hover:text-white text-slate-700 text-xs font-bold px-3 py-2 rounded-xl transition">✕ Clear</button>
+              `}
+            </div>
+          </div>
+        `;
+      }).join('') || '<span class="text-xs text-slate-400 py-3 block text-center">No orders ready</span>';
+    }
+
+    renderMenu();
+  </script>
+</body>
+</html>

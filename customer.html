@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="en" dir="ltr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Fast Orders - Customer Tracker</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800;900&family=Silkscreen&display=swap" rel="stylesheet">
+  <style>
+    body { font-family: 'Inter', sans-serif; background-color: #f8fafc; user-select: none; }
+    .dot-matrix { font-family: 'Silkscreen', monospace; letter-spacing: -2px; }
+  </style>
+</head>
+<body class="min-h-screen flex flex-col items-center justify-center p-4 text-slate-800">
+
+  <div class="max-w-md w-full bg-white rounded-3xl shadow-xl border border-slate-200 overflow-hidden text-center p-6 sm:p-8">
+    
+    <span class="text-xs bg-orange-100 text-orange-800 font-extrabold px-3 py-1 rounded-full tracking-wider uppercase">The Roastery Cafe</span>
+    
+    <!-- Order Number Header -->
+    <div class="mt-4 mb-2">
+      <span class="text-xs font-bold text-slate-400">TRACKING ORDER</span>
+      <h1 id="customer-order-num" class="dot-matrix text-6xl font-black text-slate-900 mt-1">---</h1>
+    </div>
+
+    <!-- Status Badge -->
+    <div id="status-card" class="my-6 p-5 rounded-2xl border-2 transition-all">
+      <div id="status-icon" class="text-3xl mb-1">⏳</div>
+      <h2 id="status-title" class="font-extrabold text-lg">Connecting...</h2>
+      <p id="status-desc" class="text-xs text-slate-500 mt-1">Syncing order status with the cafe counter</p>
+    </div>
+
+    <!-- ACTION BUTTONS / FEEDBACK FORM -->
+    <div id="action-container" class="space-y-3">
+      <!-- Injected dynamically based on state -->
+    </div>
+
+  </div>
+
+  <script>
+    const urlParams = new URLSearchParams(window.location.search);
+    const myOrderNum = urlParams.get('order');
+
+    if (!myOrderNum) {
+      document.getElementById('customer-order-num').innerText = '??';
+      document.getElementById('status-card').className = 'my-6 p-5 rounded-2xl border-2 border-red-200 bg-red-50 text-red-900';
+      document.getElementById('status-icon').innerText = '❌';
+      document.getElementById('status-title').innerText = 'Invalid Order Link';
+      document.getElementById('status-desc').innerText = 'Please scan the QR code provided on your cafe receipt.';
+    } else {
+      document.getElementById('customer-order-num').innerText = `#${myOrderNum}`;
+    }
+
+    const BASE_TOPIC = 'fast_orders_channel_2026';
+    const client = mqtt.connect('wss://broker.emqx.io:8084/mqtt');
+
+    let currentOrderState = null;
+    let selectedRating = 5; // Default 5 stars
+    let reviewSubmitted = false;
+
+    client.on('connect', () => {
+      client.subscribe(`${BASE_TOPIC}/orders`);
+      client.subscribe(`${BASE_TOPIC}/events`);
+    });
+
+    client.on('message', (topic, message) => {
+      try {
+        const data = JSON.parse(message.toString());
+        if (topic.endsWith('/orders') && data.orders && myOrderNum) {
+          const found = data.orders.find(o => o.number === myOrderNum);
+          if (found) {
+            currentOrderState = found;
+            updateUI(found);
+          } else {
+            // If order was removed entirely
+            if (currentOrderState && currentOrderState.status === 'picked_up') {
+              // Already handled
+            } else {
+              setCompletedUI();
+            }
+          }
+        }
+      } catch (e) {}
+    });
+
+    function updateUI(order) {
+      const card = document.getElementById('status-card');
+      const icon = document.getElementById('status-icon');
+      const title = document.getElementById('status-title');
+      const desc = document.getElementById('status-desc');
+      const actions = document.getElementById('action-container');
+
+      if (order.status === 'preparing') {
+        card.className = 'my-6 p-5 rounded-2xl border-2 border-amber-200 bg-amber-50 text-amber-950';
+        icon.innerText = '👨‍🍳';
+        title.innerText = 'Preparing Your Order';
+        desc.innerText = order.desc || 'Your order is currently being prepared at the bar.';
+        actions.innerHTML = `<p class="text-xs text-slate-400 italic">We will notify you the moment it's ready!</p>`;
+      } 
+      else if (order.status === 'ready') {
+        card.className = 'my-6 p-5 rounded-2xl border-2 border-emerald-300 bg-emerald-100 text-emerald-950 animate-pulse';
+        icon.innerText = '🔔';
+        title.innerText = 'Order is Ready!';
+        desc.innerText = 'Please head to the counter to pick up your items.';
+        
+        actions.innerHTML = `
+          <button onclick="notifyComing()" class="w-full py-3.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-xs transition shadow-lg">
+            🏃‍♂️ I'm on my way to the counter!
+          </button>
+        `;
+      } 
+      else if (order.status === 'picked_up') {
+        setCompletedUI();
+      }
+    }
+
+    function setCompletedUI() {
+      const card = document.getElementById('status-card');
+      const icon = document.getElementById('status-icon');
+      const title = document.getElementById('status-title');
+      const desc = document.getElementById('status-desc');
+      const actions = document.getElementById('action-container');
+
+      card.className = 'my-6 p-5 rounded-2xl border-2 border-slate-200 bg-slate-50 text-slate-800';
+      icon.innerText = '✅';
+      title.innerText = 'Order Picked Up';
+      desc.innerText = 'Thank you for visiting The Roastery!';
+
+      if (reviewSubmitted) {
+        actions.innerHTML = `
+          <div class="bg-emerald-50 border border-emerald-200 p-4 rounded-2xl text-emerald-900 text-xs font-bold">
+            ❤️ Thank you! Your feedback has been sent to the manager.
+          </div>
+        `;
+      } else {
+        actions.innerHTML = `
+          <div class="border-t border-slate-200 pt-4 text-left">
+            <h3 class="font-extrabold text-xs text-slate-900 mb-1 text-center">How was your experience?</h3>
+            <p class="text-[11px] text-slate-500 mb-3 text-center">Rate us and let us know what we can improve:</p>
+            
+            <!-- Star Rating Selector -->
+            <div id="star-container" class="flex justify-center gap-2 mb-3">
+              <button type="button" onclick="setRating(1)" class="text-2xl text-slate-300 hover:scale-110 transition star-btn" data-val="1">★</button>
+              <button type="button" onclick="setRating(2)" class="text-2xl text-slate-300 hover:scale-110 transition star-btn" data-val="2">★</button>
+              <button type="button" onclick="setRating(3)" class="text-2xl text-slate-300 hover:scale-110 transition star-btn" data-val="3">★</button>
+              <button type="button" onclick="setRating(4)" class="text-2xl text-slate-300 hover:scale-110 transition star-btn" data-val="4">★</button>
+              <button type="button" onclick="setRating(5)" class="text-2xl text-amber-400 hover:scale-110 transition star-btn" data-val="5">★</button>
+            </div>
+
+            <textarea id="review-comment" rows="2" placeholder="What can we improve? (optional)..." class="w-full border-2 border-slate-200 rounded-xl p-2.5 text-xs font-medium focus:outline-none focus:border-orange-500 mb-2"></textarea>
+            
+            <button onclick="submitReview()" class="w-full py-3 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs transition shadow-md">
+              Submit Feedback 🚀
+            </button>
+          </div>
+        `;
+        setRating(5); // Initialize stars
+      }
+    }
+
+    function setRating(val) {
+      selectedRating = val;
+      const buttons = document.querySelectorAll('.star-btn');
+      buttons.forEach(btn => {
+        const starVal = parseInt(btn.getAttribute('data-val'));
+        if (starVal <= val) {
+          btn.className = 'text-2xl text-amber-400 hover:scale-110 transition star-btn';
+        } else {
+          btn.className = 'text-2xl text-slate-300 hover:scale-110 transition star-btn';
+        }
+      });
+    }
+
+    function submitReview() {
+      const comment = document.getElementById('review-comment').value.trim();
+      const order = currentOrderState || {};
+      const reviewObj = {
+        orderNum: myOrderNum,
+        rating: selectedRating,
+        comment: comment,
+        items: Array.isArray(order.items) ? order.items.map(item => ({
+          name: item.name || 'Item',
+          qty: Number(item.qty) || 1,
+          price: Number(item.price) || 0
+        })) : [],
+        total: Number(order.total) || 0,
+        timestamp: Date.now()
+      };
+
+      // One retained topic per order lets the manager receive multiple reviews after reconnecting.
+      client.publish(`${BASE_TOPIC}/reviews/${encodeURIComponent(String(myOrderNum))}`, JSON.stringify({ review: reviewObj }), { retain: true });
+      reviewSubmitted = true;
+      setCompletedUI();
+    }
+
+    function notifyComing() {
+      client.publish(`${BASE_TOPIC}/events`, JSON.stringify({ type: 'coming', number: myOrderNum }), { retain: false });
+      alert('The cashier has been notified that you are heading to the counter!');
+    }
+  </script>
+</body>
+</html>

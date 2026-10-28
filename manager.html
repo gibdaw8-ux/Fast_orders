@@ -1,0 +1,568 @@
+<!DOCTYPE html>
+<html lang="en" dir="ltr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Fast Orders POS - Manager Portal & Analytics</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800;900&family=Silkscreen&display=swap" rel="stylesheet">
+  <style>
+    body { font-family: 'Inter', sans-serif; background-color: #f1f5f9; user-select: none; }
+  </style>
+</head>
+<body class="min-h-screen p-4 md:p-8 text-slate-800 flex items-center justify-center">
+
+  <!-- LOGIN SCREEN -->
+  <div id="login-card" class="bg-white rounded-3xl p-8 max-w-sm w-full shadow-xl border border-slate-200 text-center">
+    <div class="w-14 h-14 rounded-2xl bg-orange-100 text-orange-600 flex items-center justify-center text-2xl mx-auto mb-4 font-bold">🔐</div>
+    <h1 class="text-xl font-black text-slate-900 mb-1">Manager Portal</h1>
+    <p class="text-xs text-slate-500 mb-6">Sign in to manage your cafe menu and business intelligence</p>
+    
+    <form onsubmit="handleLogin(event)" class="space-y-3.5 text-left">
+      <div>
+        <label class="block text-xs font-bold text-slate-600 mb-1">Manager Email</label>
+        <input id="login-email" type="email" required placeholder="admin@roastery.com" class="w-full border-2 border-slate-200 rounded-xl px-4 py-2.5 text-sm font-bold focus:outline-none focus:border-orange-500">
+      </div>
+      <div>
+        <label class="block text-xs font-bold text-slate-600 mb-1">Password</label>
+        <input id="login-pass" type="password" required placeholder="••••••••" class="w-full border-2 border-slate-200 rounded-xl px-4 py-2.5 text-sm font-bold focus:outline-none focus:border-orange-500">
+      </div>
+      <button type="submit" class="w-full py-3.5 rounded-xl bg-orange-500 hover:bg-orange-600 text-white font-extrabold text-xs transition shadow-md mt-2">
+        Sign In
+      </button>
+    </form>
+  </div>
+
+  <!-- MANAGER DASHBOARD -->
+  <div id="dashboard-card" class="hidden max-w-5xl w-full bg-white rounded-3xl shadow-xl border border-slate-200 overflow-hidden flex flex-col min-h-[680px]">
+    
+    <!-- Top Bar -->
+    <div class="bg-slate-900 text-white px-6 py-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+      <div>
+        <span class="font-extrabold text-base block">🛠️ Manager Control Panel</span>
+        <span id="manager-logged-email" class="text-xs text-slate-400 font-semibold">Synced with cloud</span>
+      </div>
+      <div class="flex items-center gap-2 flex-wrap">
+        <button onclick="switchTab('reviews')" id="btn-tab-reviews" class="text-xs bg-slate-800 text-slate-300 hover:text-white px-3.5 py-2 rounded-xl font-bold transition">⭐ Customer Reviews</button>
+        <button onclick="switchTab('menu')" id="btn-tab-menu" class="text-xs bg-orange-500 text-white px-3.5 py-2 rounded-xl font-bold transition">📋 Menu Manager</button>
+        <button onclick="switchTab('stats')" id="btn-tab-stats" class="text-xs bg-slate-800 text-slate-300 hover:text-white px-3.5 py-2 rounded-xl font-bold transition">📊 Sales Statistics</button>
+        <button onclick="logout()" class="text-xs bg-red-600/20 hover:bg-red-600 text-red-300 hover:text-white px-3.5 py-2 rounded-xl font-bold transition">🔒 Logout</button>
+      </div>
+    </div>
+
+    <!-- TAB 1: MENU MANAGER -->
+    <div id="tab-menu" class="p-6 flex-1 flex flex-col gap-6">
+      <div class="bg-slate-50 border border-slate-200 rounded-2xl p-5">
+        <h2 class="font-extrabold text-sm text-slate-800 mb-3">➕ Add New Item to Cafe Menu</h2>
+        <form onsubmit="handleAddMenuItem(event)" class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          <input id="item-name" type="text" required placeholder="Item Name (e.g. 🍵 Green Tea)" class="border-2 border-slate-200 rounded-xl px-4 py-2.5 text-xs font-bold focus:outline-none focus:border-orange-500">
+          <input id="item-price" type="number" step="0.01" required placeholder="Price (e.g. 4.00)" class="border-2 border-slate-200 rounded-xl px-4 py-2.5 text-xs font-bold focus:outline-none focus:border-orange-500">
+          <button type="submit" class="bg-orange-500 hover:bg-orange-600 text-white font-extrabold text-xs py-2.5 rounded-xl transition shadow-sm">
+            Save & Publish Item
+          </button>
+        </form>
+      </div>
+
+      <div>
+        <h2 class="font-extrabold text-sm text-slate-800 mb-3">📋 Active Cafe Menu Items</h2>
+        <div id="manager-menu-list" class="space-y-2 max-h-[350px] overflow-y-auto pr-1"></div>
+      </div>
+    </div>
+
+    <!-- TAB 2: SALES STATISTICS & ANALYTICS -->
+    <div id="tab-stats" class="hidden p-6 flex-1 flex flex-col gap-6 overflow-y-auto max-h-[620px]">
+      <div class="flex items-center justify-between border-b border-slate-100 pb-3">
+        <div>
+          <h2 class="font-black text-lg text-slate-900">📈 Monthly Sales Statistics & Intelligence</h2>
+          <p id="stats-month-label" class="text-xs font-bold text-orange-600">Active Period: Current Month (Auto-resets monthly)</p>
+        </div>
+        <button onclick="clearStats()" class="text-xs bg-red-50 text-red-600 hover:bg-red-500 hover:text-white font-bold px-3 py-1.5 rounded-xl transition">
+          🗑️ Reset Stats
+        </button>
+      </div>
+      <!-- 1. MONTHLY SALES OVERVIEW (KPI CARDS) -->
+      <div>
+        <h3 class="font-extrabold text-xs text-slate-500 uppercase tracking-wider mb-3">1. Monthly Sales Overview</h3>
+        <div class="grid grid-cols-1 sm:grid-cols-4 gap-3">
+          <div class="bg-orange-50 border border-orange-200 rounded-2xl p-4 flex flex-col">
+            <span class="text-[11px] font-bold text-orange-700 uppercase tracking-wider">Total Revenue</span>
+            <span id="stat-total-revenue" class="text-xl font-black text-orange-900 mt-1">$0.00</span>
+          </div>
+          <div class="bg-slate-50 border border-slate-200 rounded-2xl p-4 flex flex-col">
+            <span class="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Total Orders</span>
+            <span id="stat-total-orders" class="text-xl font-black text-slate-900 mt-1">0</span>
+          </div>
+          <div class="bg-slate-50 border border-slate-200 rounded-2xl p-4 flex flex-col">
+            <span class="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Avg. Order Value</span>
+            <span id="stat-avg-order" class="text-xl font-black text-slate-900 mt-1">$0.00</span>
+          </div>
+          <div class="bg-slate-50 border border-slate-200 rounded-2xl p-4 flex flex-col">
+            <span class="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Items Sold</span>
+            <span id="stat-total-items-sold" class="text-xl font-black text-slate-900 mt-1">0</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- 3. AUTOMATIC BUSINESS CONCLUSIONS -->
+      <div class="bg-amber-50 border border-amber-200 rounded-2xl p-4">
+        <div class="flex items-center gap-2 mb-2">
+          <span class="text-amber-600 font-black text-sm">💡</span>
+          <h3 class="font-black text-xs text-amber-900 uppercase tracking-wider">Automatic Business Conclusions & Insights</h3>
+        </div>
+        <div id="insights-list" class="space-y-1.5 text-xs font-semibold text-amber-950">
+          <p class="italic text-amber-700">Not enough sales data recorded yet to generate conclusions.</p>
+        </div>
+      </div>
+
+      <!-- 2. SALES CHARTS & BREAKDOWNS -->
+      <div>
+        <h3 class="font-extrabold text-xs text-slate-500 uppercase tracking-wider mb-3">2. Sales Breakdowns & Performance Charts</h3>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+          
+          <!-- Sales by Day -->
+          <div class="bg-slate-50 border border-slate-200 rounded-2xl p-4 flex flex-col">
+            <h4 class="font-bold text-xs text-slate-700 uppercase mb-2">📅 Sales by Day of the Week</h4>
+            <div id="chart-days" class="space-y-1.5 flex-1"></div>
+          </div>
+
+          <!-- Sales by Week -->
+          <div class="bg-slate-50 border border-slate-200 rounded-2xl p-4 flex flex-col">
+            <h4 class="font-bold text-xs text-slate-700 uppercase mb-2">📊 Sales by Week of the Month</h4>
+            <div id="chart-weeks" class="space-y-1.5 flex-1"></div>
+          </div>
+
+          <!-- Best-Selling Products -->
+          <div class="bg-slate-50 border border-slate-200 rounded-2xl p-4 flex flex-col">
+            <h4 class="font-bold text-xs text-slate-700 uppercase mb-2">🏆 Best-Selling Products</h4>
+            <div id="chart-products" class="space-y-1.5 flex-1 max-h-[180px] overflow-y-auto"></div>
+          </div>
+
+          <!-- Busiest Hours of the Day -->
+          <div class="bg-slate-50 border border-slate-200 rounded-2xl p-4 flex flex-col">
+            <h4 class="font-bold text-xs text-slate-700 uppercase mb-2">⏰ Busiest Hours of the Day</h4>
+            <div id="chart-hours" class="space-y-1.5 flex-1 max-h-[180px] overflow-y-auto"></div>
+          </div>
+
+        </div>
+      </div>
+
+    </div>
+
+    <!-- TAB 3: CUSTOMER REVIEWS (integrated; no separate reviews.html needed) -->
+    <div id="tab-reviews" class="hidden p-6 flex-1 flex flex-col gap-5 overflow-y-auto max-h-[620px]">
+      <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 border-b border-slate-100 pb-3">
+        <div>
+          <h2 class="font-black text-lg text-slate-900">⭐ Customer Reviews & Order Details</h2>
+          <p class="text-xs text-slate-500">Each review includes the order items and total when the customer submits feedback.</p>
+        </div>
+        <div class="flex gap-3">
+          <div class="bg-orange-50 border border-orange-200 rounded-xl px-4 py-2">
+            <span class="block text-[10px] font-bold text-orange-700 uppercase">Average Rating</span>
+            <span id="reviews-average" class="text-xl font-black text-orange-900">0.0 ★</span>
+          </div>
+          <div class="bg-slate-50 border border-slate-200 rounded-xl px-4 py-2">
+            <span class="block text-[10px] font-bold text-slate-500 uppercase">Total Reviews</span>
+            <span id="reviews-total" class="text-xl font-black text-slate-900">0</span>
+          </div>
+        </div>
+      </div>
+      <div id="manager-reviews-list" class="space-y-3">
+        <p class="text-xs text-slate-400 italic">No customer reviews received yet.</p>
+      </div>
+    </div>
+
+  </div>
+
+  <script>
+    const BASE_TOPIC = 'fast_orders_channel_2026';
+    const client = mqtt.connect('wss://broker.emqx.io:8084/mqtt');
+
+    if (!localStorage.getItem('cafe_manager_account')) {
+      localStorage.setItem('cafe_manager_account', JSON.stringify({ email: 'admin@roastery.com', pass: '1234' }));
+    }
+    let menuItems = JSON.parse(localStorage.getItem('cafe_custom_menu')) || [
+      { id: 1, name: '☕ Latte', price: 4.50 },
+      { id: 2, name: '☕ Cappuccino', price: 4.50 },
+      { id: 3, name: '☕ Americano', price: 3.50 },
+      { id: 4, name: '☕ Espresso', price: 3.00 },
+      { id: 5, name: '🍵 Matcha Latte', price: 5.00 },
+      { id: 6, name: '🥐 Butter Croissant', price: 3.50 },
+      { id: 7, name: '🧁 Blueberry Muffin', price: 3.25 },
+      { id: 8, name: '🥪 Turkey Sandwich', price: 6.50 },
+      { id: 9, name: '🧃 Fresh Orange Juice', price: 4.00 }
+    ];
+
+    let managerReviews = JSON.parse(localStorage.getItem('cafe_customer_reviews')) || [];
+
+    client.on('connect', () => {
+      client.subscribe(`${BASE_TOPIC}/orders`);
+      client.subscribe(`${BASE_TOPIC}/menu`);
+      client.subscribe(`${BASE_TOPIC}/reviews/#`);
+    });
+
+    client.on('message', (topic, message) => {
+      try {
+        const data = JSON.parse(message.toString());
+        if (topic.endsWith('/orders') && data.orders) {
+          processSalesData(data.orders);
+        } else if (topic.includes('/reviews/') && data.review) {
+          const incoming = data.review;
+          const exists = managerReviews.some(r => String(r.orderNum) === String(incoming.orderNum));
+          if (!exists) {
+            managerReviews.unshift(incoming);
+            localStorage.setItem('cafe_customer_reviews', JSON.stringify(managerReviews));
+          } else {
+            managerReviews = managerReviews.map(r => String(r.orderNum) === String(incoming.orderNum) ? incoming : r);
+            localStorage.setItem('cafe_customer_reviews', JSON.stringify(managerReviews));
+          }
+          renderManagerReviews();
+        }
+      } catch (e) {}
+    });
+
+    function handleLogin(e) {
+      e.preventDefault();
+      const email = document.getElementById('login-email').value.trim().toLowerCase();
+      const pass = document.getElementById('login-pass').value.trim();
+      const acc = JSON.parse(localStorage.getItem('cafe_manager_account'));
+
+      if (acc && acc.email === email && acc.pass === pass) {
+        document.getElementById('login-card').classList.add('hidden');
+        document.getElementById('dashboard-card').classList.remove('hidden');
+        document.getElementById('manager-logged-email').innerText = `Signed in as: ${email}`;
+        renderManagerMenu();
+        loadAndRenderStats();
+      } else {
+        alert('Invalid email or password! (Default: admin@roastery.com / 1234)');
+      }
+    }
+
+    function logout() {
+      document.getElementById('dashboard-card').classList.add('hidden');
+      document.getElementById('login-card').classList.remove('hidden');
+      document.getElementById('login-email').value = '';
+      document.getElementById('login-pass').value = '';
+    }
+
+    function switchTab(tab) {
+      const tabs = {
+        menu: document.getElementById('tab-menu'),
+        stats: document.getElementById('tab-stats'),
+        reviews: document.getElementById('tab-reviews')
+      };
+      const buttons = {
+        menu: document.getElementById('btn-tab-menu'),
+        stats: document.getElementById('btn-tab-stats'),
+        reviews: document.getElementById('btn-tab-reviews')
+      };
+      Object.keys(tabs).forEach(key => {
+        tabs[key].classList.toggle('hidden', key !== tab);
+        buttons[key].className = key === tab
+          ? 'text-xs bg-orange-500 text-white px-3.5 py-2 rounded-xl font-bold transition'
+          : 'text-xs bg-slate-800 text-slate-300 hover:text-white px-3.5 py-2 rounded-xl font-bold transition';
+      });
+      if (tab === 'stats') loadAndRenderStats();
+      if (tab === 'reviews') renderManagerReviews();
+    }
+
+    function escapeReviewHtml(value) {
+      return String(value ?? '').replace(/[&<>"']/g, ch => ({
+        '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+      }[ch]));
+    }
+
+    function renderManagerReviews() {
+      const list = document.getElementById('manager-reviews-list');
+      const totalEl = document.getElementById('reviews-total');
+      const averageEl = document.getElementById('reviews-average');
+      if (!list || !totalEl || !averageEl) return;
+
+      totalEl.textContent = managerReviews.length;
+      const average = managerReviews.length
+        ? managerReviews.reduce((sum, review) => sum + (Number(review.rating) || 0), 0) / managerReviews.length
+        : 0;
+      averageEl.textContent = `${average.toFixed(1)} ★`;
+
+      if (!managerReviews.length) {
+        list.innerHTML = '<p class="text-xs text-slate-400 italic">No customer reviews received yet.</p>';
+        return;
+      }
+
+      list.innerHTML = managerReviews.map(review => {
+        const items = Array.isArray(review.items) ? review.items : [];
+        const itemsHtml = items.length
+          ? items.map(item => {
+              const qty = Number(item.qty) || 1;
+              const price = Number(item.price) || 0;
+              return `<div class="flex justify-between gap-3 text-xs py-1 border-b border-slate-100">
+                <span class="font-semibold text-slate-700">${qty} × ${escapeReviewHtml(item.name)}</span>
+                <span class="font-bold text-slate-800 shrink-0">$${(qty * price).toFixed(2)}</span>
+              </div>`;
+            }).join('')
+          : '<p class="text-xs italic text-slate-400">Order item details were not included in this older review.</p>';
+        const rating = Math.min(5, Math.max(0, Number(review.rating) || 0));
+        return `<article class="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm">
+          <div class="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-2 mb-3">
+            <div>
+              <div class="font-black text-sm text-slate-900">Order #${escapeReviewHtml(review.orderNum || '—')}</div>
+              <div class="text-amber-500 text-lg" aria-label="${rating} out of 5 stars">${'★'.repeat(rating)}${'☆'.repeat(5-rating)}</div>
+            </div>
+            <time class="text-[10px] text-slate-400 font-bold">${review.timestamp ? new Date(review.timestamp).toLocaleString() : 'Date unavailable'}</time>
+          </div>
+          <div class="bg-slate-50 border border-slate-100 rounded-xl p-3 mb-3">
+            <h3 class="text-[10px] uppercase tracking-wider font-extrabold text-slate-500 mb-1">Order details</h3>
+            ${itemsHtml}
+            <div class="flex justify-between gap-3 pt-2 mt-1">
+              <span class="text-xs font-extrabold text-slate-700">Order total</span>
+              <span class="text-sm font-black text-orange-600">$${(Number(review.total) || 0).toFixed(2)}</span>
+            </div>
+          </div>
+          <h3 class="text-[10px] uppercase tracking-wider font-extrabold text-slate-500 mb-1">Customer comment</h3>
+          <p class="text-xs text-slate-700 whitespace-pre-wrap">${review.comment ? escapeReviewHtml(review.comment) : '<span class="italic text-slate-400">No written comment provided.</span>'}</p>
+        </article>`;
+      }).join('');
+    }
+
+    function processSalesData(orders) {
+      const currentMonthKey = new Date().toISOString().slice(0, 7);
+      let allData = JSON.parse(localStorage.getItem('cafe_sales_archive')) || { currentMonth: currentMonthKey, orders: [], previousMonthTotal: 125.00 };
+
+      if (allData.currentMonth !== currentMonthKey) {
+        const prevTotal = allData.orders.reduce((sum, o) => sum + o.total, 0);
+        allData = { currentMonth: currentMonthKey, orders: [], previousMonthTotal: prevTotal };
+      }
+
+      orders.forEach(o => {
+        if (o.status === 'picked_up') {
+          const exists = allData.orders.some(x => x.number === o.number && x.timestamp === o.timestamp);
+          if (!exists) {
+            allData.orders.push({
+              number: o.number,
+              items: o.items || [],
+              total: o.total || 0,
+              timestamp: o.timestamp || Date.now()
+            });
+          }
+        }
+      });
+
+      localStorage.setItem('cafe_sales_archive', JSON.stringify(allData));
+    }
+
+    function loadAndRenderStats() {
+      const currentMonthKey = new Date().toISOString().slice(0, 7);
+      let allData = JSON.parse(localStorage.getItem('cafe_sales_archive')) || { currentMonth: currentMonthKey, orders: [], previousMonthTotal: 125.00 };
+
+      if (allData.currentMonth !== currentMonthKey) {
+        const prevTotal = allData.orders.reduce((sum, o) => sum + o.total, 0);
+        allData = { currentMonth: currentMonthKey, orders: [], previousMonthTotal: prevTotal };
+        localStorage.setItem('cafe_sales_archive', JSON.stringify(allData));
+      }
+
+      const orders = allData.orders;
+
+      const totalRevenue = orders.reduce((sum, o) => sum + o.total, 0);
+      const totalOrders = orders.length;
+      const avgOrderValue = totalOrders > 0 ? totalRevenue / totalOrders : 0;
+      const totalItemsSold = orders.reduce((sum, o) => {
+        if (!o.items) return sum;
+        return sum + o.items.reduce((iSum, item) => iSum + item.qty, 0);
+      }, 0);
+
+      document.getElementById('stat-total-revenue').innerText = `$${totalRevenue.toFixed(2)}`;
+      document.getElementById('stat-total-orders').innerText = totalOrders;
+      document.getElementById('stat-avg-order').innerText = `$${avgOrderValue.toFixed(2)}`;
+      document.getElementById('stat-total-items-sold').innerText = totalItemsSold;
+
+      const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+      const salesByDay = { 0:0, 1:0, 2:0, 3:0, 4:0, 5:0, 6:0 };
+      orders.forEach(o => {
+        const d = new Date(o.timestamp).getDay();
+        salesByDay[d] += o.total;
+      });
+
+      document.getElementById('chart-days').innerHTML = dayNames.map((name, idx) => `
+        <div class="flex items-center justify-between text-xs bg-white px-3 py-1.5 rounded-xl border border-slate-200">
+          <span class="font-bold text-slate-700">${name}</span>
+          <span class="font-black text-orange-600">$${salesByDay[idx].toFixed(2)}</span>
+        </div>
+      `).join('');
+
+      const salesByWeek = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 };
+      orders.forEach(o => {
+        const dateObj = new Date(o.timestamp);
+        const dayNum = dateObj.getDate();
+        const weekNum = Math.ceil(dayNum / 7);
+        if (salesByWeek[weekNum] !== undefined) salesByWeek[weekNum] += o.total;
+      });
+
+      document.getElementById('chart-weeks').innerHTML = [1,2,3,4,5].map(w => `
+        <div class="flex items-center justify-between text-xs bg-white px-3 py-1.5 rounded-xl border border-slate-200">
+          <span class="font-bold text-slate-700">Week ${w}</span>
+          <span class="font-black text-orange-600">$${salesByWeek[w].toFixed(2)}</span>
+        </div>
+      `).join('');
+
+      const productCounts = {};
+      const productRevenue = {};
+      orders.forEach(o => {
+        if (o.items) {
+          o.items.forEach(i => {
+            productCounts[i.name] = (productCounts[i.name] || 0) + i.qty;
+            productRevenue[i.name] = (productRevenue[i.name] || 0) + (i.price * i.qty);
+          });
+        }
+      });
+      const sortedProducts = Object.entries(productCounts).sort((a, b) => b[1] - a[1]);
+      const prodContainer = document.getElementById('chart-products');
+      if (sortedProducts.length === 0) {
+        prodContainer.innerHTML = `<span class="text-xs text-slate-400 italic">No products sold yet...</span>`;
+      } else {
+        prodContainer.innerHTML = sortedProducts.map(([name, qty]) => `
+          <div class="flex items-center justify-between text-xs bg-white px-3 py-1.5 rounded-xl border border-slate-200">
+            <span class="font-bold text-slate-800 truncate pr-2">${name}</span>
+            <span class="font-black text-slate-900 shrink-0">${qty} sold ($${productRevenue[name].toFixed(2)})</span>
+          </div>
+        `).join('');
+      }
+
+      const hourlySales = {};
+      for (let i = 0; i < 24; i++) hourlySales[i] = 0;
+      orders.forEach(o => {
+        const hr = new Date(o.timestamp).getHours();
+        hourlySales[hr] += o.total;
+      });
+
+      const sortedHours = Object.entries(hourlySales).sort((a, b) => b[1] - a[1]);
+      const hoursContainer = document.getElementById('chart-hours');
+      
+      const activeHours = sortedHours.filter(([hr, rev]) => rev > 0);
+      if (activeHours.length === 0) {
+        hoursContainer.innerHTML = `<span class="text-xs text-slate-400 italic">No hourly data recorded yet...</span>`;
+      } else {
+        hoursContainer.innerHTML = sortedHours.slice(0, 6).map(([hr, rev]) => {
+          const hrFormatted = hr == 0 ? '12 AM' : hr < 12 ? `${hr} AM` : hr == 12 ? '12 PM' : `${hr - 12} PM`;
+          return `
+            <div class="flex items-center justify-between text-xs bg-white px-3 py-1.5 rounded-xl border border-slate-200">
+              <span class="font-bold text-slate-700">🕒 ${hrFormatted}</span>
+              <span class="font-black text-orange-600">$${rev.toFixed(2)}</span>
+            </div>
+          `;
+        }).join('');
+      }
+
+      generateInsights(sortedProducts, hourlySales, avgOrderValue, allData.previousMonthTotal, totalRevenue);
+    }
+
+    function generateInsights(sortedProducts, hourlySales, avgOrderValue, prevMonthTotal, currentTotal) {
+      const insightsEl = document.getElementById('insights-list');
+      let insights = [];
+
+      if (sortedProducts.length === 0) {
+        insightsEl.innerHTML = `<p class="italic text-amber-700">Not enough sales data recorded yet to generate conclusions.</p>`;
+      } else {
+        const topProduct = sortedProducts[0][0];
+        insights.push(`“${topProduct} generated the most sales quantity this month.”`);
+
+        let peakHour = 0;
+        let peakRev = -1;
+        for (let hr in hourlySales) {
+          if (hourlySales[hr] > peakRev) {
+            peakRev = hourlySales[hr];
+            peakHour = parseInt(hr);
+          }
+        }
+        if (peakRev > 0) {
+          const hrStart = peakHour == 0 ? '12:00 AM' : peakHour < 12 ? `${peakHour}:00 AM` : peakHour == 12 ? '12:00 PM' : `${peakHour - 12}:00 PM`;
+          const hrEnd = (peakHour + 1) == 0 ? '1:00 AM' : (peakHour + 1) < 12 ? `${peakHour + 1}:00 AM` : (peakHour + 1) == 12 ? '1:00 PM' : `${(peakHour + 1) - 12}:00 PM`;
+          insights.push(`“Sales were highest between ${hrStart} and ${hrEnd}.”`);
+        }
+
+        if (currentTotal > prevMonthTotal) {
+          insights.push(`“Total revenue increased compared with last month ($${currentTotal.toFixed(2)} vs $${prevMonthTotal.toFixed(2)}).”`);
+        } else {
+          insights.push(`“Total revenue is currently lower than last month's baseline ($${currentTotal.toFixed(2)} vs $${prevMonthTotal.toFixed(2)}).”`);
+        }
+
+        insightsEl.innerHTML = insights.map(text => `<p>• ${text}</p>`).join('');
+      }
+    }
+
+    function clearStats() {
+      if (confirm('Are you sure you want to reset this month\'s statistics?')) {
+        const currentMonthKey = new Date().toISOString().slice(0, 7);
+        localStorage.setItem('cafe_sales_archive', JSON.stringify({ currentMonth: currentMonthKey, orders: [], previousMonthTotal: 0 }));
+        loadAndRenderStats();
+      }
+    }
+
+    function renderManagerMenu() {
+      const list = document.getElementById('manager-menu-list');
+      list.innerHTML = menuItems.map(item => `
+        <div class="bg-white border border-slate-200 rounded-2xl p-3.5 flex items-center justify-between shadow-sm gap-2">
+          <div class="flex items-center gap-3 overflow-hidden">
+            <span class="font-bold text-sm text-slate-800 truncate">${item.name}</span>
+            <span class="text-xs bg-orange-100 text-orange-800 font-extrabold px-2.5 py-1 rounded-lg shrink-0">$${item.price.toFixed(2)}</span>
+          </div>
+          <div class="flex items-center gap-2 shrink-0">
+            <button type="button" onclick="editPrice(${item.id})" class="bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold px-3 py-1.5 rounded-xl transition">
+              Edit Price
+            </button>
+            <button type="button" onclick="deleteMenuItem(${item.id})" class="bg-red-50 hover:bg-red-500 text-red-600 hover:text-white text-xs font-bold px-3 py-1.5 rounded-xl transition">
+              Delete
+            </button>
+          </div>
+        </div>
+      `).join('');
+    }
+
+    function handleAddMenuItem(e) {
+      e.preventDefault();
+      const name = document.getElementById('item-name').value.trim();
+      const price = parseFloat(document.getElementById('item-price').value);
+
+      if (!name || isNaN(price)) return;
+
+      const newId = menuItems.length > 0 ? Math.max(...menuItems.map(i => i.id)) + 1 : 1;
+      menuItems.push({ id: newId, name, price });
+
+      saveAndSyncMenu();
+      document.getElementById('item-name').value = '';
+      document.getElementById('item-price').value = '';
+    }
+
+    function editPrice(id) {
+      const item = menuItems.find(i => i.id === id);
+      if (!item) return;
+
+      const newPriceStr = prompt(`Enter new price for ${item.name}:`, item.price.toFixed(2));
+      if (newPriceStr === null) return;
+
+      const newPrice = parseFloat(newPriceStr);
+      if (isNaN(newPrice) || newPrice < 0) {
+        alert('Please enter a valid price.');
+        return;
+      }
+
+      item.price = newPrice;
+      saveAndSyncMenu();
+    }
+
+    function deleteMenuItem(id) {
+      if (confirm('Are you sure you want to delete this menu item?')) {
+        menuItems = menuItems.filter(i => i.id !== id);
+        saveAndSyncMenu();
+      }
+    }
+
+    function saveAndSyncMenu() {
+      localStorage.setItem('cafe_custom_menu', JSON.stringify(menuItems));
+      client.publish(`${BASE_TOPIC}/menu`, JSON.stringify({ menu: menuItems }), { retain: true });
+      renderManagerMenu();
+    }
+
+    renderManagerMenu();
+  </script>
+</body>
+</html>
