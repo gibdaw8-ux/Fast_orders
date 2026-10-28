@@ -516,21 +516,36 @@
         </div>
       `).join('');
     }
-
+ 
     function handleAddMenuItem(e) {
-      e.preventDefault();
-      const name = document.getElementById('item-name').value.trim();
-      const price = parseFloat(document.getElementById('item-price').value);
+  e.preventDefault();
 
-      if (!name || isNaN(price)) return;
+  const name = document.getElementById('item-name').value.trim();
+  const price = parseFloat(document.getElementById('item-price').value);
+  const category = document.getElementById('item-category').value;
 
-      const newId = menuItems.length > 0 ? Math.max(...menuItems.map(i => i.id)) + 1 : 1;
-      menuItems.push({ id: newId, name, price });
+  if (!name || !Number.isFinite(price) || price < 0) {
+    alert('Enter a valid item name and price.');
+    return;
+  }
 
-      saveAndSyncMenu();
-      document.getElementById('item-name').value = '';
-      document.getElementById('item-price').value = '';
-    }
+  const newId = menuItems.length
+    ? Math.max(...menuItems.map(item => item.id)) + 1
+    : 1;
+
+  menuItems.push({
+    id: newId,
+    name: name,
+    price: price,
+    category: category
+  });
+
+  saveAndSyncMenu();
+
+  document.getElementById('item-name').value = '';
+  document.getElementById('item-price').value = '';
+  document.getElementById('item-category').value = 'Food';
+}
 
     function editPrice(id) {
       const item = menuItems.find(i => i.id === id);
