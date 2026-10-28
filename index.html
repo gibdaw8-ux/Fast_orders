@@ -32,6 +32,12 @@
     </div>
 
     <!-- ACTION BUTTONS / FEEDBACK FORM -->
+<button
+  id="enable-sound-btn"
+  onclick="enableSound()"
+  class="w-full py-3 rounded-xl bg-slate-800 text-white font-bold text-sm mb-3">
+  🔔 Enable sound notifications
+</button>
     <div id="action-container" class="space-y-3">
       <!-- Injected dynamically based on state -->
     </div>
@@ -56,9 +62,64 @@
     const client = mqtt.connect('wss://broker.emqx.io:8084/mqtt');
 
     let currentOrderState = null;
-    let selectedRating = 5; // Default 5 stars
-    let reviewSubmitted = false;
+let selectedRating = 5;
+let reviewSubmitted = false;
 
+let soundEnabled = false;
+let audioContext = null;
+
+function enableSound() {
+  const AudioContextClass =
+    window.AudioContext || window.webkitAudioContext;
+
+  if (!AudioContextClass) {
+    alert("Sound notifications are not supported by this browser.");
+    return;
+  }
+
+  if (!audioContext) {
+    audioContext = new AudioContextClass();
+  }
+
+  audioContext.resume().then(() => {
+    soundEnabled = true;
+
+    const button = document.getElementById("enable-sound-btn");
+    if (button) {
+      button.innerText = "✅ Sound notifications enabled";
+      button.disabled = true;
+    }
+
+    playReadySound();
+  }).catch(() => {
+    alert("Please tap Enable sound notifications again.");
+  });
+}
+
+function playReadySound() {
+  if (!soundEnabled || !audioContext) return;
+
+  const playTone = (frequency, startTime) => {
+    const oscillator = audioContext.createOscillator();
+    const gain = audioContext.createGain();
+
+    oscillator.type = "sine";
+    oscillator.frequency.value = frequency;
+    gain.gain.setValueAtTime(0.001, startTime);
+    gain.gain.exponentialRampToValueAtTime(0.25, startTime + 0.03);
+    gain.gain.exponentialRampToValueAtTime(0.001, startTime + 0.35);
+
+    oscillator.connect(gain);
+    gain.connect(audioContext.destination);
+
+    oscillator.start(startTime);
+    oscillator.stop(startTime + 0.36);
+  };
+
+  const now = audioContext.currentTime;
+  playTone(880, now);
+  playTone(1175, now + 0.4);
+}
     client.on('connect', () => {
       client.subscribe(`${BASE_TOPIC}/orders`);
       client.subscribe(`${BASE_TOPIC}/events`);
@@ -69,10 +130,21 @@
         const data = JSON.parse(message.toString());
         if (topic.endsWith('/orders') && data.orders && myOrderNum) {
           const found = data.orders.find(o => o.number === myOrderNum);
-          if (found) {
-            currentOrderState = found;
-            updateUI(found);
-          } else {
+         if (found) {
+  const wasReady =
+    currentOrderState &&
+    currentOrderState.status === "ready";
+
+  const isNowReady = found.status === "ready";
+
+  if (isNowReady && !wasReady) {
+    playReadySound();
+  }
+
+  currentOrderState = found;
+  updateUI(found);
+}
+else {
             // If order was removed entirely
             if (currentOrderState && currentOrderState.status === 'picked_up') {
               // Already handled
