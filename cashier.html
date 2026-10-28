@@ -1,0 +1,68 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><script src="https://cdn.tailwindcss.com"></script><script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4"></script><script src="config.js"></script><title>Cashier</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+<style>@media print{body *{visibility:hidden}#ticket,#ticket *{visibility:visible}#ticket{position:absolute;left:0;top:0;width:100%}}</style></head>
+<body class="bg-slate-100 p-4 text-slate-800">
+<div id="login" class="hidden max-w-sm mx-auto mt-16 bg-white rounded-3xl p-6 shadow-xl space-y-3">
+  <h1 class="font-black text-lg">Staff sign in</h1>
+  <input id="em" type="email" placeholder="Email" class="w-full border-2 rounded-xl p-2.5 text-sm"><input id="pw" type="password" placeholder="Password" class="w-full border-2 rounded-xl p-2.5 text-sm">
+  <button onclick="login()" class="w-full py-3 rounded-xl bg-orange-500 text-white font-bold text-sm">Sign in</button><p id="err" class="text-xs text-red-600"></p>
+</div>
+<div id="app" class="hidden max-w-6xl mx-auto grid lg:grid-cols-12 gap-4">
+  <div class="lg:col-span-7 bg-white rounded-2xl p-4 shadow space-y-3"><h2 class="font-extrabold">Menu</h2><div id="menu" class="grid grid-cols-2 sm:grid-cols-3 gap-2"></div>
+    <div class="border-2 border-orange-200 rounded-2xl p-3"><div id="cart" class="text-xs space-y-1 min-h-[50px]"></div>
+      <div class="flex items-center justify-between mt-3"><b id="total"></b><div class="flex items-center gap-3"><button onclick="cart={};drawCart()" class="text-xs text-red-600 font-bold">Clear</button><button onclick="submit()" class="bg-slate-900 text-white text-xs font-black px-4 py-3 rounded-xl">Complete order + QR</button></div></div></div></div>
+  <div class="lg:col-span-5 space-y-3">
+    <div class="bg-white rounded-2xl p-3 shadow"><h2 class="font-extrabold text-sm mb-2">Preparing</h2><div id="prep" class="space-y-2"></div></div>
+    <div class="bg-white rounded-2xl p-3 shadow"><h2 class="font-extrabold text-sm mb-2">Ready &amp; picked up</h2><div id="ready" class="space-y-2"></div></div>
+    <button onclick="sb.auth.signOut().then(()=>location.reload())" class="text-xs font-bold text-red-600">Sign out</button></div>
+</div>
+<div id="modal" class="hidden fixed inset-0 bg-black/60 flex items-center justify-center p-4"><div class="bg-white rounded-3xl p-5 max-w-xs w-full"><div id="ticket" class="font-mono text-xs"></div>
+  <div class="flex gap-2 mt-3"><button onclick="$('modal').classList.add('hidden')" class="flex-1 py-2 rounded-xl bg-slate-200 text-xs font-bold">Close</button><button onclick="print()" class="flex-1 py-2 rounded-xl bg-slate-900 text-white text-xs font-bold">Print</button></div></div></div>
+<script>
+const sb = supabase.createClient(CONFIG.url, CONFIG.key), CAFE = CONFIG.cafe, CUR = CONFIG.cur, $ = id => document.getElementById(id);
+const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+let menu = [], cart = {}, orders = [];
+async function login() { const { error } = await sb.auth.signInWithPassword({ email: $('em').value, password: $('pw').value }); error ? $('err').innerText = error.message : start(); }
+async function start() {
+  const { data: p } = await sb.from('profiles').select('role').maybeSingle();
+  if (!p) { sb.auth.signOut(); $('login').classList.remove('hidden'); return ($('err').innerText = 'This account has no role yet. Ask the manager.'); }
+  $('login').classList.add('hidden'); $('app').classList.remove('hidden'); await loadMenu(); loadQueue(); drawCart();
+  sb.channel('live').on('postgres_changes', { event: '*', schema: 'public', table: 'orders' }, loadQueue).on('postgres_changes', { event: '*', schema: 'public', table: 'menu' }, loadMenu).subscribe();
+  setInterval(loadQueue, 20000); // safety net if the live connection drops
+}
+async function loadMenu() { menu = (await sb.from('menu').select().order('id')).data || []; drawMenu(); drawCart(); }
+async function loadQueue() { orders = (await sb.rpc('todays_orders')).data || []; drawQueue(); }
+function drawMenu() { $('menu').innerHTML = menu.map(i => `<button onclick="add(${i.id})" class="bg-slate-50 hover:bg-orange-50 border rounded-2xl p-3 text-left"><span class="font-bold text-xs block">${esc(i.name)}</span><span class="text-xs text-orange-600 font-extrabold">${CUR}${i.price.toFixed(2)}</span></button>`).join(''); }
+const add = id => { cart[id] = (cart[id] || 0) + 1; drawCart(); };
+function drawCart() {
+  let t = 0;
+  const rows = Object.entries(cart).map(([id, q]) => { const i = menu.find(x => x.id == id); if (!i) return ''; t += i.price * q;
+    return `<div class="flex justify-between bg-slate-50 rounded-xl px-3 py-1.5"><span>${q}x ${esc(i.name)}</span><span>${CUR}${(i.price * q).toFixed(2)} <button onclick="delete cart[${id}];drawCart()" class="text-red-500 font-bold">✕</button></span></div>`; });
+  $('cart').innerHTML = rows.join('') || '<span class="text-slate-400 italic">No items yet</span>'; $('total').innerText = CUR + t.toFixed(2);
+}
+async function submit() {
+  const items = Object.entries(cart).map(([id, qty]) => ({ id: +id, qty }));
+  if (!items.length) return alert('Select at least one item');
+  const { data, error } = await sb.rpc('create_order', { p_items: items });
+  if (error) return alert(error.message);
+  cart = {}; drawCart(); ticket(data); loadQueue();
+}
+function ticket(o) {
+  $('ticket').innerHTML = `<div class="text-center"><b>${esc(CAFE)}</b><div class="text-4xl font-black my-1">#${o.number}</div></div><hr class="my-2 border-dashed">` +
+    o.items.map(i => `<div class="flex justify-between"><span>${i.qty}x ${esc(i.name)}</span><span>${CUR}${(i.price * i.qty).toFixed(2)}</span></div>`).join('') +
+    `<hr class="my-2 border-dashed"><div class="flex justify-between font-bold"><span>TOTAL</span><span>${CUR}${o.total.toFixed(2)}</span></div><p class="text-center text-[10px] my-2">Scan to track your order</p><div id="qr" class="flex justify-center"></div>`;
+  $('modal').classList.remove('hidden'); new QRCode($('qr'), { text: new URL('index.html?t=' + o.token, location.href).href, width: 110, height: 110 });
+}
+const P = { ready: { status: 'ready', ringing: true, coming: false }, pickedup: { status: 'picked_up', ringing: false }, clear: { archived: true } };
+const act = async (id, a) => { const { error } = await sb.from('orders').update(P[a]).eq('id', id); error ? alert(error.message) : loadQueue(); };
+const reprint = n => ticket(orders.find(o => o.number === n));
+const btn = (c, t, id, a) => `<button onclick="act(${id},'${a}')" class="${c} text-white text-xs font-bold px-2.5 py-2 rounded-xl">${t}</button>`;
+const row = (o, right, label) => `<div class="border rounded-2xl p-3 flex items-center justify-between gap-2"><div class="overflow-hidden"><b class="text-xl">#${o.number}</b> <span class="text-[11px] font-bold">${label}</span> <span class="text-xs font-black">${CUR}${o.total.toFixed(2)}</span><p class="text-xs truncate">${esc(o.items.map(i => i.qty + 'x ' + i.name).join(', '))}</p></div><div class="flex gap-1 shrink-0"><button onclick="reprint(${o.number})" class="bg-slate-100 text-xs px-2.5 py-2 rounded-xl">🎫</button>${right}</div></div>`;
+function drawQueue() {
+  const live = orders.filter(o => !o.archived);
+  $('prep').innerHTML = live.filter(o => o.status === 'preparing').map(o => row(o, btn('bg-emerald-600', '✓ Ready', o.id, 'ready'), 'Preparing')).join('') || '<p class="text-xs text-slate-400 text-center">Nothing preparing</p>';
+  $('ready').innerHTML = live.filter(o => o.status !== 'preparing').map(o => o.status === 'picked_up' ? row(o, btn('bg-slate-400', '✕ Clear', o.id, 'clear'), '✓ Picked up')
+    : row(o, btn('bg-orange-500', '🔔', o.id, 'ready') + btn('bg-emerald-600', '✓ Picked up', o.id, 'pickedup'), o.coming ? '🏃 On the way' : '🔔 Ringing')).join('') || '<p class="text-xs text-slate-400 text-center">Nothing ready</p>';
+}
+sb.auth.getSession().then(({ data }) => data.session ? start() : $('login').classList.remove('hidden'));
+</script></body></html>

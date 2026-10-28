@@ -1,0 +1,37 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><script src="https://cdn.tailwindcss.com"></script><script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4"></script><script src="config.js"></script><title>Track your order</title></head>
+<body class="bg-slate-50 min-h-screen flex items-center justify-center p-4 text-slate-800">
+<div class="max-w-md w-full bg-white rounded-3xl shadow-xl border border-slate-200 p-6 text-center">
+  <p class="text-xs font-bold text-slate-400">YOUR ORDER</p><h1 id="num" class="text-6xl font-black my-1">--</h1>
+  <div id="card" class="my-5 p-5 rounded-2xl border-2 border-slate-200"><div id="icon" class="text-3xl">⏳</div><h2 id="title" class="font-extrabold text-lg">Connecting...</h2><p id="desc" class="text-xs text-slate-500 mt-1"></p></div>
+  <div id="actions"></div>
+</div>
+<script>
+const sb = supabase.createClient(CONFIG.url, CONFIG.key), T = new URLSearchParams(location.search).get('t'), $ = id => document.getElementById(id);
+let order = null, audio = null, timer = null, key = '';
+function beep() {
+  try { audio = audio || new AudioContext(); const o = audio.createOscillator(), g = audio.createGain(); o.connect(g); g.connect(audio.destination);
+    o.frequency.value = 880; g.gain.setValueAtTime(.3, audio.currentTime); g.gain.exponentialRampToValueAtTime(.001, audio.currentTime + .4); o.start(); o.stop(audio.currentTime + .4); } catch (e) {}
+  if (navigator.vibrate) navigator.vibrate([200, 100, 200]);
+}
+function ring(on) { if (on && !timer) { beep(); timer = setInterval(beep, 1500); } if (!on && timer) { clearInterval(timer); timer = null; } }
+function enableSound() { audio = audio || new AudioContext(); audio.resume(); beep(); $('actions').innerHTML = '<p class="text-xs font-bold text-emerald-700">✓ Sound alert on. Keep this page open.</p>'; }
+function show(cls, icon, title, desc, actions) { $('card').className = 'my-5 p-5 rounded-2xl border-2 ' + cls; $('icon').innerText = icon; $('title').innerText = title; $('desc').innerText = desc; $('actions').innerHTML = actions || ''; }
+function render() {
+  const o = order; $('num').innerText = '#' + o.number; ring(false);
+  if (o.status === 'preparing') show('border-amber-200 bg-amber-50', '👨‍🍳', 'Preparing your order', 'We will alert you the moment it is ready.', '<button onclick="enableSound()" class="w-full py-3 rounded-xl bg-slate-900 text-white text-xs font-bold">🔊 Enable sound alert</button>');
+  else if (o.status === 'ready') {
+    show('border-emerald-300 bg-emerald-100', '🔔', 'Your order is ready!', 'Please pick it up at the counter.', o.coming ? '<p class="text-xs font-bold text-emerald-800">✓ The cashier knows you are coming</p>' : '<button onclick="coming()" class="w-full py-3.5 rounded-xl bg-emerald-600 text-white text-xs font-extrabold">🏃 I am on my way</button>');
+    ring(o.ringing && !o.coming);
+  } else show('border-slate-200 bg-slate-50', '✅', 'Order picked up', 'Thank you for visiting!', o.reviewed ? '<p class="text-xs font-bold text-emerald-800">❤️ Thanks for your feedback!</p>' :
+    '<select id="rate" class="w-full border-2 rounded-xl p-2 text-xs mb-2"><option value="5">★★★★★</option><option value="4">★★★★☆</option><option value="3">★★★☆☆</option><option value="2">★★☆☆☆</option><option value="1">★☆☆☆☆</option></select><textarea id="cmt" maxlength="300" rows="2" placeholder="What can we improve? (optional)" class="w-full border-2 rounded-xl p-2 text-xs mb-2"></textarea><button onclick="review()" class="w-full py-3 rounded-xl bg-slate-900 text-white text-xs font-bold">Send feedback</button>');
+}
+function notFound() { $('num').innerText = '??'; show('border-red-200 bg-red-50', '🔍', 'Order not found', "Scan the QR code on today's receipt.", ''); }
+async function load() {
+  const { data } = await sb.rpc('track_order', { p_token: T || '' });
+  if (!data || !data.today) return notFound();
+  const k = JSON.stringify(data); if (k === key) return; key = k; order = data; render(); // only redraw when something changed
+}
+async function coming() { await sb.rpc('customer_coming', { p_token: T }); key = ''; load(); }
+async function review() { const { error } = await sb.rpc('submit_review', { p_token: T, p_rating: +$('rate').value, p_comment: $('cmt').value }); if (!error) { key = ''; load(); } }
+load(); setInterval(load, 3000); document.addEventListener('visibilitychange', () => { if (!document.hidden) load(); });
+</script></body></html>
