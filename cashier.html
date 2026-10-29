@@ -38,6 +38,31 @@
         </div>
 
         <!-- Menu Grid Container -->
+        <div class="flex flex-wrap gap-2 mb-4">
+  <button type="button" data-category="All"
+    onclick="selectMenuCategory('All')"
+    class="menu-category-btn bg-orange-500 text-white px-4 py-2 rounded-xl text-xs font-bold">
+    All
+  </button>
+
+  <button type="button" data-category="Food"
+    onclick="selectMenuCategory('Food')"
+    class="menu-category-btn bg-white text-slate-700 border px-4 py-2 rounded-xl text-xs font-bold">
+    🍳 Food
+  </button>
+
+  <button type="button" data-category="Drinks"
+    onclick="selectMenuCategory('Drinks')"
+    class="menu-category-btn bg-white text-slate-700 border px-4 py-2 rounded-xl text-xs font-bold">
+    ☕ Drinks
+  </button>
+
+  <button type="button" data-category="Extras"
+    onclick="selectMenuCategory('Extras')"
+    class="menu-category-btn bg-white text-slate-700 border px-4 py-2 rounded-xl text-xs font-bold">
+    🍰 Extras
+  </button>
+</div>
         <div id="menu-grid" class="grid grid-cols-2 sm:grid-cols-3 gap-2.5 max-h-[300px] overflow-y-auto pr-1"></div>
 
         <!-- Cart Box -->
@@ -209,32 +234,45 @@
       return String(value ?? '').replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
     }
 
-    
-    function renderMenu() {
-  const grid = document.getElementById('menu-grid');
+    let selectedMenuCategory = 'All';
 
-  const visibleItems = menuItems.filter(item => {
-    const category = item.category || 'Extras';
+function selectMenuCategory(category) {
+  selectedMenuCategory = category;
 
-    return selectedMenuCategory === 'All' ||
-           category === selectedMenuCategory;
+  document.querySelectorAll('.menu-category-btn').forEach(button => {
+    const active = button.dataset.category === category;
+
+    button.classList.toggle('bg-orange-500', active);
+    button.classList.toggle('text-white', active);
+    button.classList.toggle('bg-white', !active);
+    button.classList.toggle('text-slate-700', !active);
   });
 
-  grid.innerHTML = visibleItems.map(item => `
+  renderMenu();
+}
+
+function renderMenu() {
+  const grid = document.getElementById('menu-grid');
+
+  const filteredItems = menuItems.filter(item =>
+    selectedMenuCategory === 'All' ||
+    (item.category || 'Food').toLowerCase() ===
+      selectedMenuCategory.toLowerCase()
+  );
+
+  grid.innerHTML = filteredItems.map(item => `
     <button type="button"
       onclick="addToCart(${item.id})"
       class="w-full bg-white hover:bg-orange-50 border border-slate-200 p-3 rounded-2xl text-left flex flex-col justify-between h-full">
-
       <span class="font-bold text-xs text-slate-800">
         ${escapeHtml(item.name)}
       </span>
-
       <span class="text-xs text-orange-600 font-extrabold mt-2">
         $${Number(item.price || 0).toFixed(2)}
       </span>
     </button>
   `).join('') ||
-  '<p class="col-span-full text-xs text-slate-400 py-6 text-center">No items in this category yet.</p>';
+  '<p class="col-span-full text-xs text-slate-400 py-6 text-center">No menu items found in this category.</p>';
 }
 
     function addToCart(id) {
@@ -407,47 +445,4 @@
               <div class="flex items-baseline gap-2">
                 <span class="dot-matrix text-2xl text-slate-800">${o.number}</span>
                 <span class="text-[10px] text-amber-600 font-bold">Preparing</span>
-                <span class="text-xs font-black text-slate-700">$${o.total ? o.total.toFixed(2) : '0.00'}</span>
-              </div>
-              <p class="text-xs text-slate-600 font-semibold truncate" title="${escapeHtml(descText)}">${escapeHtml(descText)}</p>
-            </div>
-            <div class="flex items-center gap-1.5 shrink-0">
-              <button type="button" onclick="showVirtualTicketByNumber('${o.number}')" class="bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold px-2.5 py-2 rounded-xl">🎫</button>
-              <button type="button" onclick="markReady('${o.number}')" class="bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold px-3 py-2 rounded-xl">✓ Ready</button>
-            </div>
-          </div>
-        `;
-      }).join('') || '<span class="text-xs text-slate-400 py-3 block text-center">No orders preparing</span>';
-
-      document.getElementById('ready-list').innerHTML = readyOrDone.map(o => {
-        const descText = o.items ? o.items.map(i => `${i.qty}x ${i.name}`).join(', ') : o.desc;
-        const isPickedUp = o.status === 'picked_up';
-        return `
-          <div class="bg-white border border-slate-200 rounded-2xl p-3 flex items-center justify-between shadow-sm gap-2">
-            <div class="overflow-hidden">
-              <div class="flex items-baseline gap-2">
-                <span class="dot-matrix text-2xl text-slate-900">${o.number}</span>
-                <span class="text-xs font-bold ${isPickedUp ? 'text-slate-400' : (o.customerComing ? 'text-emerald-600' : 'text-orange-600')}">
-                  ${isPickedUp ? '✓ Picked Up' : (o.customerComing ? '🏃‍♂️ On the way' : '🔔 Ringing')}
-                </span>
-                <span class="text-xs font-black text-slate-700">$${o.total ? o.total.toFixed(2) : '0.00'}</span>
-              </div>
-              <p class="text-xs text-slate-600 font-semibold truncate" title="${escapeHtml(descText)}">${escapeHtml(descText)}</p>
-            </div>
-            <div class="flex gap-1 shrink-0">
-              ${!isPickedUp ? `
-                <button type="button" onclick="markReady('${o.number}')" class="bg-orange-500 hover:bg-orange-600 text-white text-xs font-bold px-2 py-2 rounded-xl">🔔</button>
-                <button type="button" onclick="completeOrder('${o.number}')" class="bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold px-2.5 py-2 rounded-xl">✓ Picked Up</button>
-              ` : `
-                <button type="button" onclick="removeOrder('${o.number}')" class="bg-slate-200 hover:bg-red-500 hover:text-white text-slate-700 text-xs font-bold px-3 py-2 rounded-xl transition">✕ Clear</button>
-              `}
-            </div>
-          </div>
-        `;
-      }).join('') || '<span class="text-xs text-slate-400 py-3 block text-center">No orders ready</span>';
-    }
-
-    renderMenu();
-  </script>
-</body>
-</html>
+                <span class="text-xs font-black text-slate-700">$${o.total ? o.total.toFixed
