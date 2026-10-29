@@ -56,7 +56,10 @@
 
     const BASE_TOPIC = 'fast_orders_channel_2026';
     const $ = id => document.getElementById(id);
-    let currentOrderState = null, selectedRating = 5, reviewSubmitted = false, gotData = false, connected = false, client = null;
+    let currentOrderState = null, selectedRating = 5, reviewSubmitted = localStorage.getItem('reviewed_' + new Date().toLocaleDateString('en-CA') + '_' + myOrderNum) === '1', 
+    gotData = false, 
+    connected = false, 
+    client = null;
 
     function setConn(text, ok) { $('conn').innerText = text; $('conn').className = 'text-[10px] font-bold mt-2 ' + (ok ? 'text-emerald-600' : 'text-red-500'); }
     function showProblem(title, desc) {
@@ -240,6 +243,7 @@
       // One retained topic per order lets the manager receive multiple reviews after reconnecting.
       client.publish(`${BASE_TOPIC}/reviews/${encodeURIComponent(String(myOrderNum))}`, JSON.stringify({ review: reviewObj }), { retain: true });
       reviewSubmitted = true;
+            localStorage.setItem('reviewed_' + new Date().toLocaleDateString('en-CA') + '_' + myOrderNum, '1');
       setCompletedUI();
     }
 
