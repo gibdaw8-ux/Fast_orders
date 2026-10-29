@@ -32,7 +32,7 @@
     </div>
 
     <!-- ACTION BUTTONS / FEEDBACK FORM -->
-<button
+    <button
   id="enable-sound-btn"
   onclick="enableSound()"
   class="w-full py-3 rounded-xl bg-slate-800 text-white font-bold text-sm mb-3">
@@ -96,62 +96,62 @@ function enableSound() {
   });
 }
 
- function playReadySound() {
+function playReadySound() {
   if (!soundEnabled || !audioContext) return;
 
-  const now = audioContext.currentTime;
-  const duration = 5;
+  const playTone = (frequency, startTime) => {
+    const oscillator = audioContext.createOscillator();
+    const gain = audioContext.createGain();
 
-  const oscillator = audioContext.createOscillator();
-  const gain = audioContext.createGain();
+    oscillator.type = "sine";
+    oscillator.frequency.value = frequency;
+    gain.gain.setValueAtTime(0.001, startTime);
+    gain.gain.exponentialRampToValueAtTime(0.25, startTime + 0.03);
+    gain.gain.exponentialRampToValueAtTime(0.001, startTime + 0.35);
 
-  oscillator.type = "sine";
-  oscillator.frequency.value = 880;
+    oscillator.connect(gain);
+    gain.connect(audioContext.destination);
 
-  gain.gain.setValueAtTime(0.001, now);
-  gain.gain.exponentialRampToValueAtTime(0.2, now + 0.1);
-  gain.gain.setValueAtTime(0.2, now + duration - 0.2);
-  gain.gain.exponentialRampToValueAtTime(
-    0.001,
-    now + duration
-  );
-
-  oscillator.connect(gain);
-  gain.connect(audioContext.destination);
-
-  oscillator.start(now);
-  oscillator.stop(now + duration);
-}
+    oscillator.start(startTime);
+    oscillator.stop(startTime + 0.36);
+  };
 
   const now = audioContext.currentTime;
   playTone(880, now);
   playTone(1175, now + 0.4);
 }
+
     client.on('connect', () => {
-      client.subscribe(`${BASE_TOPIC}/orders`);
-      client.subscribe(`${BASE_TOPIC}/events`);
-    });
+  document.getElementById('status-title').textContent = 'Connected';
+
+  client.subscribe(`${BASE_TOPIC}/orders`);
+  client.subscribe(`${BASE_TOPIC}/events`);
+});
+
+client.on('reconnect', () => {
+  document.getElementById('status-title').textContent = 'Reconnecting...';
+});
+
+client.on('offline', () => {
+  document.getElementById('status-title').textContent = 'Offline';
+});
+
+client.on('close', () => {
+  document.getElementById('status-title').textContent = 'Connection closed';
+});
+
+client.on('error', (error) => {
+  console.error('Customer MQTT error:', error);
+  document.getElementById('status-title').textContent = 'Connection error';
+});
 
     client.on('message', (topic, message) => {
       try {
         const data = JSON.parse(message.toString());
         if (topic.endsWith('/orders') && data.orders && myOrderNum) {
           const found = data.orders.find(o => o.number === myOrderNum);
-          if (found) {
-  const wasReady =
-    currentOrderState &&
-    currentOrderState.status === "ready";
-
-  const isNowReady = found.status === "ready";
-
-  if (isNowReady && !wasReady) {
-    playReadySound();
-  }
-
-  currentOrderState = found;
-  updateUI(found);
-}
- else {
+          
+          else {
             // If order was removed entirely
             if (currentOrderState && currentOrderState.status === 'picked_up') {
               // Already handled
