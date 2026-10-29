@@ -88,6 +88,8 @@
     if (client) client.on('message', (topic, message) => {
       try {
         const data = JSON.parse(message.toString());
+                // The cashier pressed the bell again: ring again
+        if (topic.endsWith('/events') && data.type === 'ring' && String(data.number) === String(myOrderNum)) { acked = false; if (currentOrderState) updateUI(currentOrderState); }
         if (topic.endsWith('/orders') && data.orders && myOrderNum) {
           gotData = true;
           const found = data.orders.find(o => String(o.number) === String(myOrderNum));
@@ -100,6 +102,33 @@
         }
       } catch (e) {}
     });
+        // ---------- Sound alert ----------
+    let audioCtx = null, soundOn = false, ringTimer = null, acked = false, wakeLock = null;
+
+    function beepOnce() {
+      if (audioCtx) [0, 0.25].forEach(t => {
+        const o = audioCtx.createOscillator(), g = audioCtx.createGain(), s = audioCtx.currentTime + t;
+        o.type = 'sine'; o.frequency.value = t ? 1175 : 880; o.connect(g); g.connect(audioCtx.destination);
+        g.gain.setValueAtTime(0.0001, s); g.gain.exponentialRampToValueAtTime(0.6, s + 0.02); g.gain.exponentialRampToValueAtTime(0.0001, s + 0.22);
+        o.start(s); o.stop(s + 0.25);
+      });
+      if (navigator.vibrate) navigator.vibrate([300, 150, 300]);
+    }
+    function startRinging() { if (ringTimer || !soundOn) return; beepOnce(); let n = 0; ringTimer = setInterval(() => { beepOnce(); if (++n > 80) stopRinging(); }, 1600); }
+    function stopRinging() { clearInterval(ringTimer); ringTimer = null; }
+    async function getWakeLock() {
+      try { if (navigator.wakeLock && !wakeLock) { wakeLock = await navigator.wakeLock.request('screen'); wakeLock.addEventListener('release', () => { wakeLock = null; }); } } catch (e) {}
+    }
+    async function enableSound() {
+      try { audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)(); await audioCtx.resume(); soundOn = true; beepOnce(); } catch (e) {}
+      getWakeLock();
+      if (currentOrderState) updateUI(currentOrderState); else document.getElementById('action-container').innerHTML = soundButton();
+    }
+    function soundButton() {
+      return soundOn
+        ? '<p class="text-xs font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-xl p-3">🔊 Sound alert is on. Keep this page open and your screen on.</p>'
+        : '<button onclick="enableSound()" class="w-full py-3.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-extrabold text-xs transition shadow-md">🔔 Enable sound notifications</button><p class="text-[11px] text-slate-400 mt-2">Tap once so your phone can ring when the order is ready.</p>';
+    }
 
     function updateUI(order) {
       const card = document.getElementById('status-card');
@@ -113,7 +142,8 @@
         icon.innerText = '👨‍🍳';
         title.innerText = 'Preparing Your Order';
         desc.innerText = order.desc || 'Your order is currently being prepared at the bar.';
-        actions.innerHTML = `<p class="text-xs text-slate-400 italic">We will notify you the moment it's ready!</p>`;
+        stopRinging();
+        actions.innerHTML = soundButton();
       } 
       else if (order.status === 'ready') {
         card.className = 'my-6 p-5 rounded-2xl border-2 border-emerald-300 bg-emerald-100 text-emerald-950 animate-pulse';
@@ -121,11 +151,11 @@
         title.innerText = 'Order is Ready!';
         desc.innerText = 'Please head to the counter to pick up your items.';
         
-        actions.innerHTML = `
-          <button onclick="notifyComing()" class="w-full py-3.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-xs transition shadow-lg">
-            🏃‍♂️ I'm on my way to the counter!
-          </button>
-        `;
+        const ringNow = order.ringing && !order.customerComing && !acked;
+        actions.innerHTML = (soundOn ? '' : soundButton() + '<div class="h-1"></div>') + (order.customerComing
+          ? '<p class="text-xs font-bold text-emerald-800 bg-emerald-50 border border-emerald-200 rounded-xl p-3">✓ The cashier knows you are on your way</p>'
+          : `<button onclick="notifyComing()" class="w-full py-3.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-xs transition shadow-lg">🏃‍♂️ I'm on my way to the counter!</button>`);
+        if (ringNow) startRinging(); else stopRinging();
       } 
       else if (order.status === 'picked_up') {
         setCompletedUI();
@@ -133,6 +163,7 @@
     }
 
     function setCompletedUI() {
+            stopRinging();
       const card = document.getElementById('status-card');
       const icon = document.getElementById('status-icon');
       const title = document.getElementById('status-title');
@@ -213,10 +244,13 @@
     }
 
     function notifyComing() {
+            acked = true; stopRinging();
       if (!client) return alert('Not connected yet. Please try again in a moment.');
       client.publish(`${BASE_TOPIC}/events`, JSON.stringify({ type: 'coming', number: myOrderNum }), { retain: false });
       alert('The cashier has been notified that you are heading to the counter!');
     }
+        if (myOrderNum) document.getElementById('action-container').innerHTML = soundButton();
+    document.addEventListener('visibilitychange', () => { if (!document.hidden && soundOn) getWakeLock(); });
   </script>
 </body>
 </html>
