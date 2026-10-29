@@ -32,7 +32,7 @@
     </div>
 
     <!-- ACTION BUTTONS / FEEDBACK FORM -->
-<button
+    <button
   id="enable-sound-btn"
   onclick="enableSound()"
   class="w-full py-3 rounded-xl bg-slate-800 text-white font-bold text-sm mb-3">
@@ -122,11 +122,11 @@ function playReadySound() {
   oscillator.start(now);
   oscillator.stop(now + duration);
 }
-
   const now = audioContext.currentTime;
   playTone(880, now);
   playTone(1175, now + 0.4);
 }
+
     client.on('connect', () => {
       client.subscribe(`${BASE_TOPIC}/orders`);
       client.subscribe(`${BASE_TOPIC}/events`);
@@ -137,7 +137,7 @@ function playReadySound() {
         const data = JSON.parse(message.toString());
         if (topic.endsWith('/orders') && data.orders && myOrderNum) {
           const found = data.orders.find(o => o.number === myOrderNum);
-         if (found) {
+          if (found) {
   const wasReady =
     currentOrderState &&
     currentOrderState.status === "ready";
@@ -151,7 +151,7 @@ function playReadySound() {
   currentOrderState = found;
   updateUI(found);
 }
-else {
+          else {
             // If order was removed entirely
             if (currentOrderState && currentOrderState.status === 'picked_up') {
               // Already handled
