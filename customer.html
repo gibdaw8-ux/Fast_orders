@@ -43,6 +43,9 @@
   <script>
     const urlParams = new URLSearchParams(window.location.search);
     const myOrderNum = urlParams.get('order');
+        const reviewDay = new Date().toLocaleDateString('en-CA');
+    // closed = feedback was already sent for this order, so the QR code no longer works
+    let closed = localStorage.getItem('reviewed_' + reviewDay + '_' + myOrderNum) === '1', justSubmitted = false;
 
     if (!myOrderNum) {
       document.getElementById('customer-order-num').innerText = '??';
@@ -76,6 +79,7 @@
         connected = true; setConn('● Live', true);
         client.subscribe(`${BASE_TOPIC}/orders`);
         client.subscribe(`${BASE_TOPIC}/events`);
+                if (myOrderNum) client.subscribe(`${BASE_TOPIC}/reviews/${reviewDay}-${encodeURIComponent(String(myOrderNum))}`);
       });
       client.on('close', () => { connected = false; setConn('● Reconnecting…', false); });
       client.on('error', () => setConn('● Reconnecting…', false));
@@ -83,7 +87,7 @@
 
     // After 8 seconds, say what is wrong instead of staying on "Connecting..." forever
     setTimeout(() => {
-      if (gotData || !myOrderNum) return;
+      if (gotData || !myOrderNum || closed) return;
       if (!connected) showProblem("Can't reach the live server", 'Try Wi-Fi or mobile data, then reload. We keep retrying automatically.');
       else { $('status-title').innerText = 'Waiting for the cafe system'; $('status-desc').innerText = 'Your order is not showing yet. The cashier screen may be offline. This page updates by itself.'; }
     }, 8000);
@@ -91,6 +95,7 @@
     if (client) client.on('message', (topic, message) => {
       try {
         const data = JSON.parse(message.toString());
+                if (topic.includes('/reviews/')) { if (!justSubmitted && data.review) { closed = true; stopRinging(); showClosed(); } return; }
                 // The cashier pressed the bell again: ring again
         if (topic.endsWith('/events') && data.type === 'ring' && String(data.number) === String(myOrderNum)) { acked = false; if (currentOrderState) updateUI(currentOrderState); }
         if (topic.endsWith('/orders') && data.orders && myOrderNum) {
@@ -134,6 +139,7 @@
     }
 
     function updateUI(order) {
+            if (closed) { showClosed(); return; }
       const card = document.getElementById('status-card');
       const icon = document.getElementById('status-icon');
       const title = document.getElementById('status-title');
@@ -164,9 +170,17 @@
         setCompletedUI();
       }
     }
+        function showClosed() {
+      document.getElementById('status-card').className = 'my-6 p-5 rounded-2xl border-2 border-slate-200 bg-slate-50 text-slate-800';
+      document.getElementById('status-icon').innerText = '🔒';
+      document.getElementById('status-title').innerText = 'This QR code has expired';
+      document.getElementById('status-desc').innerText = 'This order is complete and your feedback was received. Thank you for visiting The Roastery!';
+      document.getElementById('action-container').innerHTML = '';
+    }
 
     function setCompletedUI() {
             stopRinging();
+                  if (closed) { showClosed(); return; }
       const card = document.getElementById('status-card');
       const icon = document.getElementById('status-icon');
       const title = document.getElementById('status-title');
@@ -241,8 +255,9 @@
 
       if (!client) return alert('Not connected yet. Please try again in a moment.');
       // One retained topic per order lets the manager receive multiple reviews after reconnecting.
-      client.publish(`${BASE_TOPIC}/reviews/${encodeURIComponent(String(myOrderNum))}`, JSON.stringify({ review: reviewObj }), { retain: true });
+      client.publish(`${BASE_TOPIC}/reviews/${reviewDay}-${encodeURIComponent(String(myOrderNum))}`, JSON.stringify({ review: reviewObj }), { retain: true });
       reviewSubmitted = true;
+            justSubmitted = true;
             localStorage.setItem('reviewed_' + new Date().toLocaleDateString('en-CA') + '_' + myOrderNum, '1');
       setCompletedUI();
     }
@@ -253,7 +268,7 @@
       client.publish(`${BASE_TOPIC}/events`, JSON.stringify({ type: 'coming', number: myOrderNum }), { retain: false });
       alert('The cashier has been notified that you are heading to the counter!');
     }
-        if (myOrderNum) document.getElementById('action-container').innerHTML = soundButton();
+            if (closed) showClosed(); else if (myOrderNum) document.getElementById('action-container').innerHTML = soundButton();
     document.addEventListener('visibilitychange', () => { if (!document.hidden && soundOn) getWakeLock(); });
   </script>
 </body>
