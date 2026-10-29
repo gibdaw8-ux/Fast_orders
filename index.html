@@ -5,7 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Fast Orders - Customer Tracker</title>
   <script src="https://cdn.tailwindcss.com"></script>
-  <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/mqtt@5.10.1/dist/mqtt.min.js"></script>
+  <script>window.mqtt || document.write('<script src="https://unpkg.com/mqtt@5.10.1/dist/mqtt.min.js"><\/script>')</script>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800;900&family=Silkscreen&display=swap" rel="stylesheet">
   <style>
     body { font-family: 'Inter', sans-serif; background-color: #f8fafc; user-select: none; }
@@ -17,6 +18,7 @@
   <div class="max-w-md w-full bg-white rounded-3xl shadow-xl border border-slate-200 overflow-hidden text-center p-6 sm:p-8">
     
     <span class="text-xs bg-orange-100 text-orange-800 font-extrabold px-3 py-1 rounded-full tracking-wider uppercase">The Roastery Cafe</span>
+    <p id="conn" class="text-[10px] font-bold mt-2 text-slate-400">● Connecting…</p>
     
     <!-- Order Number Header -->
     <div class="mt-4 mb-2">
@@ -32,12 +34,6 @@
     </div>
 
     <!-- ACTION BUTTONS / FEEDBACK FORM -->
-    <button
-  id="enable-sound-btn"
-  onclick="enableSound()"
-  class="w-full py-3 rounded-xl bg-slate-800 text-white font-bold text-sm mb-3">
-  🔔 Enable sound notifications
-</button>
     <div id="action-container" class="space-y-3">
       <!-- Injected dynamically based on state -->
     </div>
@@ -59,105 +55,47 @@
     }
 
     const BASE_TOPIC = 'fast_orders_channel_2026';
-    const client = mqtt.connect('wss://broker.emqx.io:8084/mqtt');
+    const $ = id => document.getElementById(id);
+    let currentOrderState = null, selectedRating = 5, reviewSubmitted = false, gotData = false, connected = false, client = null;
 
-    let currentOrderState = null;
-let selectedRating = 5;
-let reviewSubmitted = false;
-
-let soundEnabled = false;
-let audioContext = null;
-
-function enableSound() {
-  const AudioContextClass =
-    window.AudioContext || window.webkitAudioContext;
-
-  if (!AudioContextClass) {
-    alert("Sound notifications are not supported by this browser.");
-    return;
-  }
-
-  if (!audioContext) {
-    audioContext = new AudioContextClass();
-  }
-
-  audioContext.resume().then(() => {
-    soundEnabled = true;
-
-    const button = document.getElementById("enable-sound-btn");
-    if (button) {
-      button.innerText = "✅ Sound notifications enabled";
-      button.disabled = true;
+    function setConn(text, ok) { $('conn').innerText = text; $('conn').className = 'text-[10px] font-bold mt-2 ' + (ok ? 'text-emerald-600' : 'text-red-500'); }
+    function showProblem(title, desc) {
+      $('status-card').className = 'my-6 p-5 rounded-2xl border-2 border-red-200 bg-red-50 text-red-900';
+      $('status-icon').innerText = '⚠️'; $('status-title').innerText = title; $('status-desc').innerText = desc;
     }
 
-    playReadySound();
-  }).catch(() => {
-    alert("Please tap Enable sound notifications again.");
-  });
-}
+    if (typeof mqtt === 'undefined') {
+      setConn('● Not connected', false);
+      showProblem('Live updates could not load', 'Check your internet connection, then reload this page.');
+    } else {
+      client = mqtt.connect('wss://broker.emqx.io:8084/mqtt', { reconnectPeriod: 2000, connectTimeout: 10000 });
+      client.on('connect', () => {
+        connected = true; setConn('● Live', true);
+        client.subscribe(`${BASE_TOPIC}/orders`);
+        client.subscribe(`${BASE_TOPIC}/events`);
+      });
+      client.on('close', () => { connected = false; setConn('● Reconnecting…', false); });
+      client.on('error', () => setConn('● Reconnecting…', false));
+    }
 
-function playReadySound() {
-  if (!soundEnabled || !audioContext) return;
+    // After 8 seconds, say what is wrong instead of staying on "Connecting..." forever
+    setTimeout(() => {
+      if (gotData || !myOrderNum) return;
+      if (!connected) showProblem("Can't reach the live server", 'Try Wi-Fi or mobile data, then reload. We keep retrying automatically.');
+      else { $('status-title').innerText = 'Waiting for the cafe system'; $('status-desc').innerText = 'Your order is not showing yet. The cashier screen may be offline. This page updates by itself.'; }
+    }, 8000);
 
-  const now = audioContext.currentTime;
-  const duration = 5;
-
-  const oscillator = audioContext.createOscillator();
-  const gain = audioContext.createGain();
-
-  oscillator.type = "sine";
-  oscillator.frequency.value = 880;
-
-  gain.gain.setValueAtTime(0.001, now);
-  gain.gain.exponentialRampToValueAtTime(0.2, now + 0.1);
-  gain.gain.setValueAtTime(0.2, now + duration - 0.2);
-  gain.gain.exponentialRampToValueAtTime(
-    0.001,
-    now + duration
-  );
-
-  oscillator.connect(gain);
-  gain.connect(audioContext.destination);
-
-  oscillator.start(now);
-  oscillator.stop(now + duration);
-}
-  const now = audioContext.currentTime;
-  playTone(880, now);
-  playTone(1175, now + 0.4);
-}
-
-    client.on('connect', () => {
-      client.subscribe(`${BASE_TOPIC}/orders`);
-      client.subscribe(`${BASE_TOPIC}/events`);
-    });
-
-    client.on('message', (topic, message) => {
+    if (client) client.on('message', (topic, message) => {
       try {
         const data = JSON.parse(message.toString());
         if (topic.endsWith('/orders') && data.orders && myOrderNum) {
-          const found = data.orders.find(o => o.number === myOrderNum);
+          gotData = true;
+          const found = data.orders.find(o => String(o.number) === String(myOrderNum));
           if (found) {
-  const wasReady =
-    currentOrderState &&
-    currentOrderState.status === "ready";
-
-  const isNowReady = found.status === "ready";
-
-  if (isNowReady && !wasReady) {
-    playReadySound();
-  }
-
-  currentOrderState = found;
-  updateUI(found);
-}
-          else {
-            // If order was removed entirely
-            if (currentOrderState && currentOrderState.status === 'picked_up') {
-              // Already handled
-            } else {
-              setCompletedUI();
-            }
+            currentOrderState = found;
+            updateUI(found);
+          } else if (!currentOrderState) {
+            showProblem('Order not found', 'We cannot find this order. Make sure the QR code is from your latest receipt.');
           }
         }
       } catch (e) {}
@@ -267,6 +205,7 @@ function playReadySound() {
         timestamp: Date.now()
       };
 
+      if (!client) return alert('Not connected yet. Please try again in a moment.');
       // One retained topic per order lets the manager receive multiple reviews after reconnecting.
       client.publish(`${BASE_TOPIC}/reviews/${encodeURIComponent(String(myOrderNum))}`, JSON.stringify({ review: reviewObj }), { retain: true });
       reviewSubmitted = true;
@@ -274,6 +213,7 @@ function playReadySound() {
     }
 
     function notifyComing() {
+      if (!client) return alert('Not connected yet. Please try again in a moment.');
       client.publish(`${BASE_TOPIC}/events`, JSON.stringify({ type: 'coming', number: myOrderNum }), { retain: false });
       alert('The cashier has been notified that you are heading to the counter!');
     }
